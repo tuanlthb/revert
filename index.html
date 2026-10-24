@@ -500,9 +500,9 @@
 
   <!-- GUIDE MODAL: How to get Token -->
   <div id="modal-guide" class="modal-overlay">
-    <div class="modal-box" style="max-width: 600px;">
+    <div class="modal-box" style="max-width: 620px;">
       <div class="modal-header">
-        <h3><i class="fa-solid fa-circle-question" style="color: var(--primary);"></i> Cách lấy Token GHN Tra Cứu Nội Bộ</h3>
+        <h3><i class="fa-solid fa-circle-question" style="color: var(--primary);"></i> Cách lấy &amp; tự động đồng bộ Token GHN</h3>
         <button id="btn-close-guide" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
@@ -512,10 +512,15 @@
         <div class="guide-step">
           <div class="guide-step-num">1</div>
           <div>
-            <strong>Đăng nhập vào GHN Tra Cứu Nội Bộ</strong>
-            <p style="color: var(--text-muted); font-size: 12.5px;">
-              Mở trang <a href="https://tracuunoibo.ghn.vn/internal/revert" target="_blank" style="color: var(--primary); font-weight: 600;">tracuunoibo.ghn.vn</a> trên trình duyệt và đăng nhập tài khoản nhân viên của bạn.
+            <strong>Cách 1 (Tự động 100% ngầm): Cài đặt / Cập nhật Script Tampermonkey v3.1</strong>
+            <p style="color: var(--text-muted); font-size: 12.5px; margin-bottom: 8px;">
+              Nếu trình duyệt đã có tiện ích <strong>Tampermonkey</strong>, bấm nút bên dưới để cài đặt/cập nhật lên bản <strong>v3.1</strong>. Sau đó chỉ cần mở <a href="https://tracuunoibo.ghn.vn/internal/revert" target="_blank" style="color: var(--primary); font-weight: 600;">tracuunoibo.ghn.vn</a> là Token tự động đẩy lên Cloud và truyền thẳng sang web này:
             </p>
+            <div>
+              <a href="ghn_revert_kho.user.js" target="_blank" class="btn btn-primary btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                <i class="fa-solid fa-bolt"></i> Cài đặt / Cập nhật Tampermonkey Script (v3.1)
+              </a>
+            </div>
           </div>
         </div>
 
@@ -523,19 +528,16 @@
         <div class="guide-step">
           <div class="guide-step-num">2</div>
           <div>
-            <strong>Cách 1: Lấy Token tự động bằng 1 dòng lệnh Console (Nhanh nhất)</strong>
+            <strong>Cách 2 (Không cần cài tiện ích): Kéo nút Bookmarklet 1-Chạm</strong>
             <p style="color: var(--text-muted); font-size: 12.5px;">
-              Tại trang GHN, bấm phím <kbd style="background: #f1f5f9; padding: 2px 5px; border-radius: 4px; border: 1px solid #cbd5e1;">F12</kbd> (hoặc chuột phải chọn <em>Kiểm tra</em>), chuyển sang tab <strong>Console</strong>, dán đoạn lệnh sau và bấm Enter:
+              Kéo nút cam bên dưới thả lên <strong>Thanh dấu trang (Bookmarks Bar)</strong>. Khi đang ở trang <a href="https://tracuunoibo.ghn.vn/internal/revert" target="_blank" style="color: var(--primary); font-weight: 600;">tracuunoibo.ghn.vn</a>, bấm vào nút đó trên thanh dấu trang — nó sẽ <strong>tự động lấy Token sống, đẩy lên Google Script Cloud và mở ngay trang Revert Hub đã kết nối sẵn</strong>:
             </p>
-            <div class="code-box">
-              <span>copy(localStorage.getItem('token') || sessionStorage.getItem('token'));</span>
-              <button type="button" onclick="navigator.clipboard.writeText('copy(localStorage.getItem(\'token\') || sessionStorage.getItem(\'token\'));'); alert('Đã copy lệnh!');">
-                Copy lệnh
-              </button>
+            <div style="margin-top: 8px;">
+              <a href="javascript:(function(){var t=(localStorage.getItem('token')||sessionStorage.getItem('token')||'').trim().replace(/^[&quot;']+|['&quot;]+$/g,'');if(t&amp;&amp;t.length>=10){try{fetch('https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec?token='+encodeURIComponent(t)+'&amp;_t='+Date.now(),{mode:'no-cors'});}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(t);window.open('https://tuanlthb.github.io/revert/?token='+encodeURIComponent(t),'_blank');}else{alert('Chưa tìm thấy Token! Hãy đảm bảo bạn đang mở và đã đăng nhập trên trang tracuunoibo.ghn.vn');}})();" 
+                 class="btn btn-outline btn-sm" style="border: 1.5px dashed var(--primary); color: var(--primary); font-weight: 700;">
+                ⚡ Kéo tôi lên Thanh Dấu Trang: "Đồng Bộ Token GHN"
+              </a>
             </div>
-            <p style="color: #059669; font-size: 12px; font-weight: 600;">
-              ✓ Sau khi ấn Enter, Token sẽ tự động được copy vào bộ nhớ tạm của bạn!
-            </p>
           </div>
         </div>
 
@@ -543,27 +545,16 @@
         <div class="guide-step">
           <div class="guide-step-num">3</div>
           <div>
-            <strong>Cách 2: Sử dụng Bookmarklet (1 chạm trên thanh dấu trang)</strong>
+            <strong>Cách 3: Lấy &amp; Đồng bộ bằng 1 dòng lệnh Console (F12)</strong>
             <p style="color: var(--text-muted); font-size: 12.5px;">
-              Kéo nút bên dưới thả vào thanh Dấu trang (Bookmarks bar) của trình duyệt. Khi đang ở trang tracuunoibo.ghn.vn, chỉ cần bấm vào bookmark này là token tự động copy:
+              Tại trang <code>tracuunoibo.ghn.vn</code>, bấm <kbd style="background: #f1f5f9; padding: 2px 5px; border-radius: 4px; border: 1px solid #cbd5e1;">F12</kbd> &gt; tab <strong>Console</strong>, dán lệnh sau và ấn Enter (tự động Copy + đẩy lên Cloud + mở trang Revert):
             </p>
-            <div style="margin-top: 8px;">
-              <a href="javascript:(function(){var t=localStorage.getItem('token')||sessionStorage.getItem('token');if(t){navigator.clipboard.writeText(t).then(function(){alert('Đã copy Token GHN thành công! Hãy dán vào ô Token.');});}else{alert('Không tìm thấy Token. Hãy đảm bảo bạn đã đăng nhập tracuunoibo.ghn.vn');}})();" 
-                 class="btn btn-outline btn-sm" style="border: 1.5px dashed var(--primary); color: var(--primary);">
-                ⭐ Kéo tôi vào Bookmark Bar: "Lấy Token GHN"
-              </a>
+            <div class="code-box">
+              <span style="font-size: 11.5px;">var t=localStorage.getItem('token')||sessionStorage.getItem('token');copy(t);window.open('https://tuanlthb.github.io/revert/?token='+t);</span>
+              <button type="button" onclick="navigator.clipboard.writeText(&quot;var t=(localStorage.getItem('token')||sessionStorage.getItem('token')||'').trim();copy(t);fetch('https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec?token='+encodeURIComponent(t),{mode:'no-cors'});window.open('https://tuanlthb.github.io/revert/?token='+encodeURIComponent(t));&quot;); alert('Đã copy lệnh! Hãy sang tab tracuunoibo.ghn.vn ấn F12 > Console > dán vào và Enter.');">
+                Copy lệnh
+              </button>
             </div>
-          </div>
-        </div>
-
-        <!-- Step 4 -->
-        <div class="guide-step">
-          <div class="guide-step-num">4</div>
-          <div>
-            <strong>Dán vào ô Token và bấm "Lưu & Kết Nối"</strong>
-            <p style="color: var(--text-muted); font-size: 12.5px;">
-              Quay lại trang này, dán token vào ô trên cùng. Token sẽ được lưu an toàn trong trình duyệt của bạn cho các lần sử dụng tiếp theo.
-            </p>
           </div>
         </div>
 
@@ -686,22 +677,32 @@
         <!-- Tampermonkey Local Auto-Bridge Status -->
         <div id="tm-bridge-banner" style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 12.5px; color: #065f46;">
           <div style="font-weight: 700; margin-bottom: 4px;">
-            <i class="fa-solid fa-bolt"></i> Cách 1: Tự động bắt Token trực tiếp qua Tampermonkey (Khuyên dùng)
+            <i class="fa-solid fa-bolt"></i> Tự động lấy Token từ tracuunoibo.ghn.vn &amp; đẩy lên Cloud
           </div>
-          <div id="tm-bridge-status-text">
-            Chỉ cần cài file <code>ghn_revert_kho.user.js</code> vào Tampermonkey. Mỗi khi bạn mở <strong>tracuunoibo.ghn.vn</strong>, script sẽ tự động truyền Token sang trang web này và đẩy lên Cloud (kể cả Token UUID 36 ký tự).
+          <div id="tm-bridge-status-text" style="margin-bottom: 8px;">
+            Cài đặt/cập nhật Script Tampermonkey <strong>v3.1</strong> (hoặc kéo nút Bookmarklet lên thanh dấu trang). Khi bạn mở <strong>tracuunoibo.ghn.vn</strong>, Token sống sẽ tự động đẩy lên Google Script bên dưới cho toàn bộ đội ngũ!
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <a href="ghn_revert_kho.user.js" target="_blank" class="btn btn-primary btn-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+              <i class="fa-solid fa-download"></i> Cài / Cập nhật Tampermonkey v3.1
+            </a>
+            <a href="javascript:(function(){var t=(localStorage.getItem('token')||sessionStorage.getItem('token')||'').trim().replace(/^[&quot;']+|['&quot;]+$/g,'');if(t&amp;&amp;t.length>=10){try{fetch('https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec?token='+encodeURIComponent(t)+'&amp;_t='+Date.now(),{mode:'no-cors'});}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(t);window.open('https://tuanlthb.github.io/revert/?token='+encodeURIComponent(t),'_blank');}else{alert('Chưa tìm thấy Token! Hãy đảm bảo bạn đang mở và đã đăng nhập trên trang tracuunoibo.ghn.vn');}})();"
+               class="btn btn-outline btn-sm" style="border: 1.5px dashed #059669; color: #065f46; background: #fff; text-decoration: none; font-weight: 700;">
+              ⚡ Kéo lên Bookmark Bar: "Đồng Bộ Token GHN"
+            </a>
           </div>
         </div>
 
         <div class="form-group" style="margin-bottom: 16px;">
           <label class="form-label" for="sync-url-input">
-            <span>Cách 2: URL Đồng Bộ Cloud Cho Đội Ngũ (Google Apps Script):</span>
+            <span>URL Đồng Bộ Cloud Cho Đội Ngũ (Google Apps Script - Đã tích hợp sẵn):</span>
           </label>
           <input 
             type="text" 
             id="sync-url-input" 
             class="combobox-input" 
             style="font-family: monospace; font-size: 12.5px; padding-left: 14px;"
+            value="https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec"
             placeholder="https://script.google.com/macros/s/.../exec" 
           />
           <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex-wrap: wrap; gap: 8px;">

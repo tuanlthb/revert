@@ -48,8 +48,8 @@
 
   // --- FIXED DEFAULT TOKEN & SYNC URL ---
   const FIXED_DEFAULT_TOKEN = 'ed19b5b2-74a1-42f5-bdd3-d3deecd16278';
-  // Có thể dán URL Google Apps Script cố định vào đây để mọi nhân viên mở web đều tự động tải Token
-  const DEFAULT_SYNC_URL = '';
+  // URL Google Apps Script cố định để mọi nhân viên mở web đều tự động tải Token mà không cần cấu hình
+  const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec';
 
   // --- APPLICATION STATE ---
   const state = {
@@ -306,18 +306,23 @@ function doPost(e) {
 
   async function initToken() {
     // 1. Check URL query / hash for ?token=...
+    let receivedFromUrl = false;
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const urlToken = urlParams.get('token') || new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token');
       if (urlToken && urlToken.trim().length >= 10) {
-        const cleanUrlTok = urlToken.trim();
-        localStorage.setItem('ghn_revert_token', cleanUrlTok);
+        const cleanUrlTok = urlToken.trim().replace(/^["']+|["']+$/g, '');
+        if (cleanUrlTok !== FIXED_DEFAULT_TOKEN) {
+          localStorage.setItem('ghn_revert_token', cleanUrlTok);
+          localStorage.setItem('ghn_bridged_token', cleanUrlTok);
+          receivedFromUrl = true;
+          addLog('✓ Đã nhận Token mới truyền trực tiếp từ đường dẫn URL.');
+        }
         window.history.replaceState({}, document.title, window.location.pathname);
-        addLog('Đã nhận Token truyền trực tiếp từ đường dẫn URL.');
       }
     } catch (_) {}
 
-    // 2. Listen for Tampermonkey Auto-Bridge events
+    // 2. Listen for Tampermonkey Auto-Bridge events (CustomEvent & window.postMessage across isolated worlds)
     window.addEventListener('ghn-token-bridged', (e) => {
       const detail = (e && e.detail) || {};
       if (detail.token && detail.token.trim().length >= 10) {
@@ -325,7 +330,14 @@ function doPost(e) {
       }
     });
 
-    // Also listen for BroadcastChannel / postMessage from companion tab
+    window.addEventListener('message', (ev) => {
+      const data = ev && ev.data;
+      if (data && data.type === 'GHN_TOKEN_BRIDGED' && data.token) {
+        handleBridgedToken(String(data.token).trim(), data.updatedAt);
+      }
+    });
+
+    // Also listen for BroadcastChannel from companion tab
     try {
       const bc = new BroadcastChannel('ghn_revert_token_channel');
       bc.onmessage = (ev) => {
@@ -336,19 +348,20 @@ function doPost(e) {
     } catch (_) {}
 
     // 3. Determine initial candidate tokens in priority order
-    const bridgedToken = window.__GHN_BRIDGED_TOKEN__ || localStorage.getItem('ghn_bridged_token');
+    const domAttrToken = document.documentElement.getAttribute('data-ghn-bridged-token');
+    const bridgedToken = domAttrToken || window.__GHN_BRIDGED_TOKEN__ || localStorage.getItem('ghn_bridged_token');
     const ghnPageToken = localStorage.getItem('token') || sessionStorage.getItem('token') || localStorage.getItem('ghn_extracted_token');
     const savedRevertToken = localStorage.getItem('ghn_revert_token');
 
     // Avoid getting stuck on the expired default token if another token exists
     const candidates = [
-      bridgedToken,
-      ghnPageToken,
+      (bridgedToken && bridgedToken !== FIXED_DEFAULT_TOKEN) ? bridgedToken : null,
+      (ghnPageToken && ghnPageToken !== FIXED_DEFAULT_TOKEN) ? ghnPageToken : null,
       (savedRevertToken && savedRevertToken !== FIXED_DEFAULT_TOKEN) ? savedRevertToken : null,
       FIXED_DEFAULT_TOKEN
     ].filter(t => t && String(t).trim().length >= 10);
 
-    const initialToken = (candidates[0] || FIXED_DEFAULT_TOKEN).trim();
+    const initialToken = (candidates[0] || FIXED_DEFAULT_TOKEN).trim().replace(/^["']+|["']+$/g, '');
     state.token = initialToken;
     els.tokenInput.value = initialToken;
 
@@ -358,34 +371,35 @@ function doPost(e) {
     }
 
     // 4. Validate the initial token
-    const isValid = await checkTokenValidity(initialToken, false);
+    const isValid = await checkTokenValidity(initialToken, receivedFromUrl);
 
     // 5. If initial token is invalid or Cloud Sync is configured, try Cloud Sync automatically
     if (syncUrl) {
       if (!isValid) {
-        addLog('Token mặc định đã hết hạn, đang tự động tải Token mới nhất từ Cloud Sync...');
+        addLog('Đang tự động tải Token mới nhất từ Google Script Cloud Sync...');
         await fetchTokenFromCloudSync(syncUrl, false);
       } else {
-        // Even if valid, check Cloud Sync in background or push our valid token to Cloud
+        // Valid local token! Push it to Cloud so all team members get the latest live token
         syncWithCloudBidirectional(syncUrl, initialToken);
       }
     }
   }
 
   async function handleBridgedToken(newToken, updatedAt) {
-    if (!newToken || newToken.length < 10) return;
-    localStorage.setItem('ghn_bridged_token', newToken);
+    const cleanTok = String(newToken || '').trim().replace(/^["']+|["']+$/g, '');
+    if (!cleanTok || cleanTok.length < 10 || cleanTok === FIXED_DEFAULT_TOKEN) return;
+    localStorage.setItem('ghn_bridged_token', cleanTok);
 
     if (els.tmBridgeStatusText) {
       const timeLabel = updatedAt ? new Date(updatedAt).toLocaleString('vi-VN') : 'Vừa xong';
       els.tmBridgeStatusText.innerHTML = `<strong style="color:#047857;">✓ Đã kết nối cầu nối Tampermonkey!</strong> Token tự động nhận từ tracuunoibo.ghn.vn lúc ${timeLabel}.`;
     }
 
-    if (newToken !== state.token || !state.isTokenValid) {
-      state.token = newToken;
-      els.tokenInput.value = newToken;
-      addLog(`⚡ Đã tự động nhận Token mới từ Tampermonkey (tracuunoibo.ghn.vn): ${newToken.slice(0, 8)}...`);
-      const ok = await checkTokenValidity(newToken, false);
+    if (cleanTok !== state.token || !state.isTokenValid) {
+      state.token = cleanTok;
+      els.tokenInput.value = cleanTok;
+      addLog(`⚡ Đã tự động nhận Token mới từ Tampermonkey (tracuunoibo.ghn.vn): ${cleanTok.slice(0, 8)}...`);
+      const ok = await checkTokenValidity(cleanTok, false);
       if (ok) {
         if (els.cloudSyncInfoPill) {
           els.cloudSyncInfoPill.style.display = 'inline-flex';
@@ -404,7 +418,7 @@ function doPost(e) {
   }
 
   async function fetchTokenFromCloudSync(syncUrl, isManual = false) {
-    const cleanUrl = (syncUrl || '').trim();
+    const cleanUrl = (syncUrl || DEFAULT_SYNC_URL || '').trim();
     if (!cleanUrl) {
       if (isManual) showToast('Vui lòng nhập URL Google Apps Script trước!', 'error');
       return false;
@@ -439,34 +453,58 @@ function doPost(e) {
       }
 
       if (data && data.token && String(data.token).trim().length >= 10) {
-        const remoteToken = String(data.token).trim();
+        const remoteToken = String(data.token).trim().replace(/^["']+|["']+$/g, '');
+        const timeStr = data.updated_at ? new Date(data.updated_at).toLocaleString('vi-VN') : 'Vừa xong';
+
+        // If we already have a valid local token and Cloud has the expired default token, push our valid token instead!
+        if (remoteToken === FIXED_DEFAULT_TOKEN && state.isTokenValid && state.token && state.token !== FIXED_DEFAULT_TOKEN) {
+          addLog('Token trên Cloud đang là bản mặc định cũ, hệ thống tự động đẩy Token sống hiện tại lên Cloud...');
+          return await pushTokenToCloudSync(cleanUrl, state.token, isManual);
+        }
+
         state.token = remoteToken;
         els.tokenInput.value = remoteToken;
 
-        const timeStr = data.updated_at ? new Date(data.updated_at).toLocaleString('vi-VN') : 'Vừa xong';
-        if (els.cloudSyncInfoPill) {
-          els.cloudSyncInfoPill.style.display = 'inline-flex';
-          els.cloudSyncInfoText.textContent = `Đã đồng bộ tự động từ Quản lý (${timeStr})`;
-        }
-
-        if (els.syncStatusDetail) {
-          els.syncStatusDetail.textContent = `✓ Đã tải Token từ Cloud (${timeStr})`;
-          els.syncStatusDetail.style.color = '#059669';
-        }
-
         addLog(`Đã tải Token từ Cloud (${timeStr}): ${remoteToken.slice(0, 8)}...`);
-        const valid = await checkTokenValidity(remoteToken, isManual);
-        if (valid && isManual) {
-          showToast('Đã đồng bộ và kết nối Token thành công!', 'success');
+        const valid = await checkTokenValidity(remoteToken, false);
+
+        if (valid) {
+          if (els.cloudSyncInfoPill) {
+            els.cloudSyncInfoPill.style.display = 'inline-flex';
+            els.cloudSyncInfoText.textContent = `Đã đồng bộ tự động từ Cloud (${timeStr})`;
+          }
+          if (els.syncStatusDetail) {
+            els.syncStatusDetail.textContent = `✓ Đã tải & kết nối Token hợp lệ từ Cloud (${timeStr})`;
+            els.syncStatusDetail.style.color = '#059669';
+          }
+          if (isManual) {
+            showToast('Đã đồng bộ và kết nối Token từ Cloud thành công!', 'success');
+          }
+          return true;
+        } else {
+          // Token on Cloud is expired! Tell the user clearly why and how to push a fresh one
+          const expMsg = `Token đang lưu trên Cloud (${remoteToken.slice(0, 8)}...) đã hết hạn! Hãy mở tracuunoibo.ghn.vn để tự động đẩy Token mới lên Cloud.`;
+          if (els.syncStatusDetail) {
+            els.syncStatusDetail.textContent = `⚠️ ${expMsg}`;
+            els.syncStatusDetail.style.color = '#dc2626';
+          }
+          if (els.cloudSyncInfoPill) {
+            els.cloudSyncInfoPill.style.display = 'inline-flex';
+            els.cloudSyncInfoText.textContent = `Token trên Cloud đã hết hạn - Cần mở tracuunoibo.ghn.vn để làm mới`;
+          }
+          addLog(`⚠️ ${expMsg}`, true);
+          if (isManual) {
+            showToast(expMsg, 'error', 6000);
+          }
+          return false;
         }
-        return valid;
       } else {
         // Cloud currently has no token stored yet. If we have a valid token locally, push it!
         if (state.isTokenValid && state.token && state.token !== FIXED_DEFAULT_TOKEN) {
           addLog('Cloud chưa có Token, đang tự động đẩy Token hợp lệ hiện tại lên Cloud...');
           return await pushTokenToCloudSync(cleanUrl, state.token, isManual);
         }
-        throw new Error('Trên Cloud hiện chưa có Token nào được lưu. Hãy bấm "Đẩy Token lên Cloud" hoặc mở tracuunoibo.ghn.vn để tự động đẩy lên.');
+        throw new Error('Trên Cloud hiện chưa có Token sống. Hãy mở tracuunoibo.ghn.vn để tự động bắt và đẩy Token mới lên Cloud.');
       }
     } catch (err) {
       if (els.syncStatusDetail) {
@@ -480,8 +518,8 @@ function doPost(e) {
   }
 
   async function pushTokenToCloudSync(syncUrl, tokenToPush, isManual = false) {
-    const cleanUrl = (syncUrl || '').trim();
-    const tok = (tokenToPush || els.tokenInput.value || state.token || '').trim();
+    const cleanUrl = (syncUrl || DEFAULT_SYNC_URL || '').trim();
+    const tok = (tokenToPush || els.tokenInput.value || state.token || '').trim().replace(/^["']+|["']+$/g, '');
 
     if (!cleanUrl) {
       if (isManual) showToast('Vui lòng nhập URL Google Apps Script trước!', 'error');
@@ -492,28 +530,55 @@ function doPost(e) {
       return false;
     }
 
-    if (isManual) showToast('Đang đẩy Token lên Cloud...', 'info');
+    // CRITICAL GUARD: Never push an expired or invalid token onto Cloud!
+    if (tok === FIXED_DEFAULT_TOKEN) {
+      const msg = 'Token trong ô đang là Token mặc định đã hết hạn! Vui lòng lấy Token mới từ tracuunoibo.ghn.vn trước khi đẩy lên Cloud.';
+      if (els.syncStatusDetail) {
+        els.syncStatusDetail.textContent = `⚠️ ${msg}`;
+        els.syncStatusDetail.style.color = '#dc2626';
+      }
+      if (isManual) showToast(msg, 'error', 5500);
+      addLog(`Từ chối đẩy Token mặc định hết hạn (${tok.slice(0, 8)}...) lên Cloud.`, true);
+      return false;
+    }
+
+    // Verify with GHN API first if not yet verified
+    if (!(state.isTokenValid && state.token === tok)) {
+      if (els.syncStatusDetail) {
+        els.syncStatusDetail.textContent = 'Trạng thái: Đang kiểm tra tính hợp lệ của Token trước khi đẩy lên Cloud...';
+        els.syncStatusDetail.style.color = '#0284c7';
+      }
+      const isOk = await checkTokenValidity(tok, false);
+      if (!isOk) {
+        const msg = 'Token này đã hết hạn hoặc không hợp lệ! Hệ thống chặn không đẩy Token lỗi lên Cloud.';
+        if (els.syncStatusDetail) {
+          els.syncStatusDetail.textContent = `⚠️ ${msg}`;
+          els.syncStatusDetail.style.color = '#dc2626';
+        }
+        if (isManual) showToast(msg, 'error', 5500);
+        return false;
+      }
+    }
+
+    if (isManual) showToast('Đang đẩy Token hợp lệ lên Cloud...', 'info');
     if (els.syncStatusDetail) {
       els.syncStatusDetail.textContent = 'Trạng thái: Đang đẩy Token lên Cloud...';
       els.syncStatusDetail.style.color = '#0284c7';
     }
 
     try {
-      // Use text/plain;charset=utf-8 so browser does NOT send OPTIONS preflight (avoids Google Apps Script CORS error!)
-      const res = await fetch(cleanUrl, {
-        method: 'POST',
-        redirect: 'follow',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8'
-        },
-        body: JSON.stringify({ token: tok })
+      // Use GET ?token=... first (100% immune to CORS & POST redirect body loss on Google Apps Script)
+      const sep = cleanUrl.includes('?') ? '&' : '?';
+      const getRes = await fetch(`${cleanUrl}${sep}token=${encodeURIComponent(tok)}&_t=${Date.now()}`, {
+        method: 'GET',
+        redirect: 'follow'
       });
 
       let success = false;
-      if (res.ok) {
+      if (getRes.ok) {
         try {
-          const data = await res.json();
-          if (data && (data.code === 200 || data.message === 'Updated')) {
+          const data = await getRes.json();
+          if (data && (data.code === 200 || data.message === 'Updated' || data.token === tok)) {
             success = true;
           }
         } catch (_) {
@@ -521,29 +586,32 @@ function doPost(e) {
         }
       }
 
-      // Fallback via GET ?token=... if POST did not return 200
+      // Fallback via POST text/plain if GET didn't update
       if (!success) {
-        const sep = cleanUrl.includes('?') ? '&' : '?';
-        const getRes = await fetch(`${cleanUrl}${sep}token=${encodeURIComponent(tok)}&_t=${Date.now()}`, {
-          method: 'GET',
-          redirect: 'follow'
+        const res = await fetch(cleanUrl, {
+          method: 'POST',
+          redirect: 'follow',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
+          },
+          body: JSON.stringify({ token: tok })
         });
-        if (getRes.ok) success = true;
+        if (res.ok) success = true;
       }
 
       if (success) {
         localStorage.setItem('ghn_last_pushed_cloud_token', tok);
         const nowStr = new Date().toLocaleString('vi-VN');
         if (els.syncStatusDetail) {
-          els.syncStatusDetail.textContent = `✓ Đã đẩy Token lên Cloud thành công (${nowStr})`;
+          els.syncStatusDetail.textContent = `✓ Đã đẩy Token sống lên Cloud thành công (${nowStr})`;
           els.syncStatusDetail.style.color = '#059669';
         }
         if (els.cloudSyncInfoPill) {
           els.cloudSyncInfoPill.style.display = 'inline-flex';
           els.cloudSyncInfoText.textContent = `Đã đồng bộ Cloud (${nowStr})`;
         }
-        addLog(`✓ Đã đẩy Token (${tok.slice(0, 8)}...) lên Cloud thành công.`);
-        if (isManual) showToast('Đã đẩy Token lên Cloud thành công! Đội ngũ có thể sử dụng ngay.', 'success');
+        addLog(`✓ Đã đẩy Token sống (${tok.slice(0, 8)}...) lên Cloud thành công.`);
+        if (isManual) showToast('Đã đẩy Token sống lên Cloud thành công! Đội ngũ có thể sử dụng ngay.', 'success');
         return true;
       } else {
         throw new Error('Không nhận được phản hồi thành công từ Google Script.');
