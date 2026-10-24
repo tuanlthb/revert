@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GHN - Revert & Cập Nhật Kho Đơn Hàng</title>
+  
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  
+  <!-- Font Awesome 6 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- SheetJS for Excel import/export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-container">
+        <div class="logo-badge">
+          <i class="fa-solid fa-boxes-packing"></i>
+        </div>
+        <div class="brand-info">
+          <h1>GHN Revert Hub <span class="tag">Online Tool</span></h1>
+          <p>Hệ thống hỗ trợ cập nhật kho hàng loạt qua tracuunoibo.ghn.vn</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div id="token-pill" class="token-status-pill">
+          <span class="status-dot"></span>
+          <span id="token-status-text">Chưa kết nối Token</span>
+        </div>
+        <button id="btn-open-guide" class="btn btn-secondary btn-sm">
+          <i class="fa-solid fa-circle-question"></i> Hướng dẫn lấy Token
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="container">
+    
+    <!-- Token Management Panel -->
+    <section class="token-panel">
+      <div class="token-input-group">
+        <i class="fa-solid fa-key input-icon"></i>
+        <input 
+          type="password" 
+          id="token-input" 
+          class="token-input" 
+          value="ed19b5b2-74a1-42f5-bdd3-d3deecd16278"
+          placeholder="Nhập hoặc dán Token GHN của bạn (JWT Token)..." 
+          autocomplete="off"
+        />
+        <button type="button" id="btn-toggle-token" class="token-toggle-btn" title="Hiện/Ẩn token">
+          <i class="fa-solid fa-eye"></i>
+        </button>
+      </div>
+
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <button id="btn-save-token" class="btn btn-primary btn-sm">
+          <i class="fa-solid fa-floppy-disk"></i> Lưu & Kết Nối
+        </button>
+        <button id="btn-check-token" class="btn btn-secondary btn-sm" title="Kiểm tra thông tin tài khoản">
+          <i class="fa-solid fa-arrows-rotate"></i> Kiểm tra
+        </button>
+        <button id="btn-open-sync-modal" class="btn btn-outline btn-sm" title="Tự động đồng bộ Token từ máy chủ hoặc Google Apps Script">
+          <i class="fa-solid fa-cloud-arrow-down"></i> Tự động đồng bộ
+        </button>
+      </div>
+
+      <div id="user-info-badge" class="user-badge-info" style="display: none;">
+        <div class="user-avatar-circle" id="user-avatar-text">U</div>
+        <div>
+          <div id="user-fullname" style="font-weight: 700; font-size: 13px;">Nhân viên GHN</div>
+          <div id="user-id-code" style="font-size: 11px; color: var(--text-muted);">Mã: ---</div>
+        </div>
+      </div>
+
+      <div id="cloud-sync-info-pill" style="display: none; font-size: 12px; color: #0284c7; background: #f0f9ff; border: 1px solid #bae6fd; padding: 4px 10px; border-radius: 20px; align-items: center; gap: 6px;">
+        <i class="fa-solid fa-cloud-check"></i>
+        <span id="cloud-sync-info-text">Đã đồng bộ tự động từ Quản lý</span>
+      </div>
+    </section>
+
+    <!-- Progress Card (Visible when executing) -->
+    <section id="progress-card" class="progress-card">
+      <div class="progress-header">
+        <span id="progress-status-text"><i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý cập nhật kho...</span>
+        <span id="progress-percent">0%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div id="progress-bar-fill" class="progress-bar-fill"></div>
+      </div>
+    </section>
+
+    <!-- Main 2-Column Grid -->
+    <div class="main-grid">
+      
+      <!-- LEFT COLUMN: Input & Settings -->
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        
+        <!-- CARD 1: Orders Input -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <i class="fa-solid fa-list-ol"></i>
+              <span>1. Danh sách đơn hàng cần thao tác</span>
+            </div>
+            <span id="order-counter-badge" class="badge-counter">0 đơn</span>
+          </div>
+
+          <div class="card-body">
+            <div class="orders-textarea-wrapper">
+              <textarea 
+                id="orders-textarea" 
+                class="orders-textarea" 
+                placeholder="Nhập hoặc dán danh sách mã đơn vào đây...&#10;Ví dụ:&#10;GBL7E69G&#10;GBMK8P4W&#10;GBL7E8K2&#10;(Hỗ trợ dán từ cột Excel, ngăn cách bởi xuống dòng, dấu phẩy, khoảng trắng)"
+              ></textarea>
+
+              <div class="orders-textarea-footer">
+                <span id="order-hint-text">Mẹo: Bạn có thể copy cả cột mã đơn từ Excel rồi dán trực tiếp.</span>
+                <div class="textarea-actions">
+                  <button id="btn-paste-clipboard" class="btn btn-outline btn-sm" title="Dán từ bộ nhớ tạm">
+                    <i class="fa-regular fa-clipboard"></i> Dán
+                  </button>
+                  <label for="excel-file-input" class="btn btn-outline btn-sm" style="cursor: pointer;" title="Tải file Excel/CSV">
+                    <i class="fa-solid fa-file-excel"></i> File
+                  </label>
+                  <input type="file" id="excel-file-input" accept=".xlsx, .xls, .csv" style="display: none;" />
+                  <button id="btn-clean-orders" class="btn btn-outline btn-sm" title="Lọc trùng và xóa dòng trống">
+                    <i class="fa-solid fa-broom"></i> Lọc trùng
+                  </button>
+                  <button id="btn-clear-orders" class="btn btn-danger btn-sm" title="Xóa toàn bộ đơn">
+                    <i class="fa-solid fa-trash-can"></i> Xóa
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 2: Update Configuration -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <i class="fa-solid fa-sliders"></i>
+              <span>2. Thiết lập chuyển đổi kho</span>
+            </div>
+          </div>
+
+          <div class="card-body">
+            
+            <!-- Type Selector: Kho Giao / Kho Hien Tai / Kho Lay / Kho Tra -->
+            <div class="form-group">
+              <label class="form-label">
+                <span>Lựa chọn cập nhật loại kho: <span class="req">*</span></span>
+              </label>
+              
+              <div class="type-selector-grid">
+                <!-- Deliver (Kho Giao) - Value 3 -->
+                <div class="type-card type-deliver active" data-type="3">
+                  <input type="radio" name="warehouseType" value="3" checked />
+                  <div class="icon-wrap"><i class="fa-solid fa-truck"></i></div>
+                  <div class="type-name">Kho Giao</div>
+                  <div class="type-sub">Deliver Hub</div>
+                </div>
+
+                <!-- Current (Kho Hien Tai) - Value 1 -->
+                <div class="type-card type-current" data-type="1">
+                  <input type="radio" name="warehouseType" value="1" />
+                  <div class="icon-wrap"><i class="fa-solid fa-warehouse"></i></div>
+                  <div class="type-name">Kho Hiện Tại</div>
+                  <div class="type-sub">Current Hub</div>
+                </div>
+
+                <!-- Pick (Kho Lay) - Value 2 -->
+                <div class="type-card type-pick" data-type="2">
+                  <input type="radio" name="warehouseType" value="2" />
+                  <div class="icon-wrap"><i class="fa-solid fa-box"></i></div>
+                  <div class="type-name">Kho Lấy</div>
+                  <div class="type-sub">Pick Hub</div>
+                </div>
+
+                <!-- Return (Kho Tra) - Value 4 -->
+                <div class="type-card type-return" data-type="4">
+                  <input type="radio" name="warehouseType" value="4" />
+                  <div class="icon-wrap"><i class="fa-solid fa-rotate-left"></i></div>
+                  <div class="type-name">Kho Trả</div>
+                  <div class="type-sub">Return Hub</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ward Selector: Chọn phường/xã đúng (hệ thống sẽ tự chọn kho đúng) -->
+            <div class="form-group" id="ward-selector-group">
+              <label class="form-label">
+                <span class="label-with-tooltip">
+                  Chọn phường/xã đúng (hệ thống sẽ tự chọn kho đúng)
+                  <span class="info-tooltip-wrap">
+                    <i class="fa-regular fa-circle-question"></i>
+                    <span class="info-tooltip-popup">
+                      Chọn phường/xã và loại kho cần cập nhật để tự động chọn kho phù hợp. Không áp dụng khi cập nhật Kho hiện tại.
+                    </span>
+                  </span>
+                </span>
+              </label>
+
+              <div id="ward-selector-box" class="ward-selector-box" title="Nhấn để chọn Phường/Xã giúp hệ thống tự chọn kho đúng">
+                <span id="ward-selector-text" class="ward-selector-text">Chọn phường/xã (không bắt buộc)</span>
+                <span class="ward-selector-actions">
+                  <button type="button" id="btn-clear-ward" class="ward-clear-btn" title="Bỏ chọn phường/xã">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                  <i class="fa-solid fa-chevron-down" style="font-size: 11px; color: #94a3b8;"></i>
+                </span>
+              </div>
+
+              <div id="ward-autofill-feedback" class="ward-autofill-feedback"></div>
+            </div>
+
+            <!-- Destination Warehouse Combobox -->
+            <div class="form-group">
+              <label class="form-label" for="wh-search-input">
+                <span>Chọn kho<span class="req">*</span></span>
+                <span id="wh-total-count" style="font-size: 11.5px; color: var(--text-muted); font-weight: 500;">
+                  Đang tải danh mục kho...
+                </span>
+              </label>
+              
+              <div class="warehouse-combobox-wrapper">
+                <div class="combobox-input-container">
+                  <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                  <input 
+                    type="text" 
+                    id="wh-search-input" 
+                    class="combobox-input" 
+                    placeholder="Gõ tên bưu cục, mã kho hoặc địa chỉ để tìm kiếm (VD: 1418, Chi Nê, Cầu Giấy)..."
+                    autocomplete="off"
+                  />
+                  <button type="button" id="wh-clear-btn" class="combobox-clear-btn">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <div id="wh-dropdown" class="combobox-dropdown">
+                  <!-- Generated items go here -->
+                </div>
+              </div>
+
+              <!-- Selected Warehouse Preview Card -->
+              <div id="selected-wh-preview" class="selected-wh-preview">
+                <div class="wh-preview-info">
+                  <div class="wh-preview-title" id="preview-wh-name">Chưa chọn kho chuyển sang</div>
+                  <div class="wh-preview-meta" id="preview-wh-meta">Vui lòng tìm và chọn bưu cục từ danh sách trên</div>
+                </div>
+                <div id="preview-wh-badge" class="badge-counter" style="display: none;">ID: ---</div>
+              </div>
+            </div>
+
+            <!-- Reason Select -->
+            <div class="form-group">
+              <label class="form-label" for="reason-select">
+                <span>Lý do đổi kho: <span class="req">*</span></span>
+              </label>
+
+              <select id="reason-select" class="reason-select">
+                <option value="area_closer_to_other_bc">Khu vực giáp ranh với BC khác gần hơn</option>
+                <option value="overload_support_other_bc">Chuyển BC khác hỗ trợ quá tải</option>
+                <option value="newly_opened_bc">Chuyển về BC mới mở</option>
+                <option value="wrong_weight_dimension_correct_bc">Sai cân nặng kích thước chuyển về đúng BC phụ trách</option>
+                <option value="address_other_bc">Địa chỉ nằm ở khu vực BC khác phụ trách</option>
+                <option value="other_reason">Lý do khác (Nhập diễn giải cụ thể)</option>
+              </select>
+
+              <textarea 
+                id="custom-reason-textarea" 
+                class="reason-custom-textarea" 
+                placeholder="Nhập lý do đổi kho chi tiết của bạn..."
+                style="display: none;"
+                maxlength="500"
+              ></textarea>
+            </div>
+
+            <!-- Batch size option -->
+            <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--text-muted); padding-top: 4px;">
+              <span>Gói gửi mỗi lần (Batch Size):</span>
+              <select id="batch-size-select" style="padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px;">
+                <option value="30">30 đơn / lượt</option>
+                <option value="50" selected>50 đơn / lượt (Khuyên dùng)</option>
+                <option value="100">100 đơn / lượt</option>
+              </select>
+            </div>
+
+            <!-- Main Action Execution -->
+            <div class="action-box">
+              <button type="button" id="btn-update-warehouse" class="btn btn-primary btn-update-large">
+                <i class="fa-solid fa-paper-plane"></i> CẬP NHẬT KHO
+              </button>
+              <button type="button" id="btn-stop-execution" class="btn btn-danger" style="display: none; padding: 14px 20px;">
+                <i class="fa-solid fa-stop"></i> Dừng
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN: Results & Realtime Monitoring -->
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        
+        <div class="card" style="height: 100%;">
+          <div class="card-header">
+            <div class="card-title">
+              <i class="fa-solid fa-chart-pie"></i>
+              <span>3. Kết quả cập nhật</span>
+            </div>
+            
+            <div style="display: flex; gap: 8px;">
+              <button id="btn-export-excel" class="btn btn-success btn-sm" style="display: none;">
+                <i class="fa-solid fa-file-excel"></i> Xuất Excel
+              </button>
+              <button id="btn-clear-results" class="btn btn-outline btn-sm" style="display: none;" title="Xóa bảng kết quả">
+                <i class="fa-solid fa-rotate-left"></i> Làm mới
+              </button>
+            </div>
+          </div>
+
+          <!-- Result Tabs Navigation -->
+          <div class="results-header-tabs">
+            <button class="result-tab-btn active" data-tab="success">
+              <i class="fa-solid fa-circle-check" style="color: var(--success);"></i>
+              <span>Thành công</span>
+              <span id="tab-count-success" class="tab-badge badge-success">0</span>
+            </button>
+            <button class="result-tab-btn" data-tab="eform">
+              <i class="fa-solid fa-clock" style="color: var(--warning);"></i>
+              <span>Chờ Eform</span>
+              <span id="tab-count-eform" class="tab-badge badge-warning">0</span>
+            </button>
+            <button class="result-tab-btn" data-tab="failed">
+              <i class="fa-solid fa-circle-xmark" style="color: var(--danger);"></i>
+              <span>Thất bại</span>
+              <span id="tab-count-failed" class="tab-badge badge-danger">0</span>
+            </button>
+            <button class="result-tab-btn" data-tab="logs">
+              <i class="fa-solid fa-terminal"></i>
+              <span>Nhật ký</span>
+            </button>
+          </div>
+
+          <!-- Tab Content Area -->
+          <div class="results-content-area">
+            
+            <!-- Tab: Success -->
+            <div id="tab-pane-success" class="tab-pane">
+              <div id="empty-success" class="empty-state">
+                <i class="fa-regular fa-folder-open"></i>
+                <p>Chưa có đơn hàng cập nhật thành công</p>
+              </div>
+              <div id="table-wrap-success" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <span style="font-size: 13px; font-weight: 600; color: #065f46;">Các đơn đã chuyển kho hoàn tất:</span>
+                  <button id="btn-copy-success" class="btn btn-secondary btn-sm">
+                    <i class="fa-regular fa-copy"></i> Copy tất cả
+                  </button>
+                </div>
+                <table class="results-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 50px;">STT</th>
+                      <th>Mã đơn hàng</th>
+                      <th>Loại kho</th>
+                      <th>Kho đích</th>
+                      <th>Thời gian</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-success"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Tab: Eform -->
+            <div id="tab-pane-eform" class="tab-pane" style="display: none;">
+              <div id="empty-eform" class="empty-state">
+                <i class="fa-regular fa-hourglass-half"></i>
+                <p>Không có đơn nào cần chờ duyệt Eform</p>
+              </div>
+              <div id="table-wrap-eform" style="display: none;">
+                <div style="background: var(--warning-light); border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 12.5px; color: #92400e;">
+                  <i class="fa-solid fa-circle-exclamation"></i> Các đơn này thuộc kho ngoài phạm vi trực tiếp của bạn. Hệ thống GHN đã gửi yêu cầu Eform để Quản lý bưu cục đích phê duyệt.
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                  <button id="btn-copy-eform" class="btn btn-secondary btn-sm">
+                    <i class="fa-regular fa-copy"></i> Copy tất cả
+                  </button>
+                </div>
+                <table class="results-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 50px;">STT</th>
+                      <th>Mã đơn hàng</th>
+                      <th>Trạng thái</th>
+                      <th>Kho đích yêu cầu</th>
+                      <th>Thời gian</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-eform"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Tab: Failed -->
+            <div id="tab-pane-failed" class="tab-pane" style="display: none;">
+              <div id="empty-failed" class="empty-state">
+                <i class="fa-regular fa-circle-check"></i>
+                <p>Không có đơn hàng nào thất bại</p>
+              </div>
+              <div id="table-wrap-failed" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <span style="font-size: 13px; font-weight: 600; color: #991b1b;">Danh sách đơn cập nhật thất bại:</span>
+                  <button id="btn-copy-failed" class="btn btn-secondary btn-sm">
+                    <i class="fa-regular fa-copy"></i> Copy mã đơn lỗi
+                  </button>
+                </div>
+                <table class="results-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 50px;">STT</th>
+                      <th>Mã đơn hàng</th>
+                      <th>Nguyên nhân lỗi</th>
+                      <th>Thời gian</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-failed"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Tab: Logs -->
+            <div id="tab-pane-logs" class="tab-pane" style="display: none;">
+              <div id="system-logs" style="background: #0f172a; color: #e2e8f0; font-family: 'Consolas', monospace; font-size: 12px; padding: 14px; border-radius: 8px; min-height: 280px; max-height: 420px; overflow-y: auto; line-height: 1.7;">
+                <div>[System] Sẵn sàng hoạt động. Chào mừng bạn đến với GHN Revert Hub.</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- CONFIRMATION MODAL -->
+  <div id="modal-confirm" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-triangle-exclamation" style="color: var(--primary);"></i> Xác nhận cập nhật kho</h3>
+        <button id="btn-close-confirm" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body">
+        <p style="margin-bottom: 14px;">Bạn đang chuẩn bị thực hiện chuyển đổi kho cho các đơn hàng với thông số sau:</p>
+        
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+          <div><strong>Số lượng đơn:</strong> <span id="confirm-order-count" style="color: var(--primary); font-weight: 700;">0</span> đơn hàng</div>
+          <div><strong>Loại kho cần cập nhật:</strong> <span id="confirm-wh-type" style="font-weight: 700;">Kho Giao</span></div>
+          <div><strong>Kho chuyển sang:</strong> <span id="confirm-wh-dest" style="font-weight: 700; color: #0f172a;">---</span></div>
+          <div><strong>Lý do đổi kho:</strong> <span id="confirm-reason" style="font-style: italic;">---</span></div>
+        </div>
+
+        <p style="margin-top: 14px; font-size: 12px; color: var(--text-muted);">
+          * Lưu ý: Thao tác sẽ được ghi nhận trực tiếp trên hệ thống GHN Tra Cứu Nội Bộ.
+        </p>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btn-cancel-confirm" class="btn btn-secondary">Hủy bỏ</button>
+        <button id="btn-execute-confirmed" class="btn btn-primary">
+          <i class="fa-solid fa-check"></i> Xác nhận & Cập nhật ngay
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GUIDE MODAL: How to get Token -->
+  <div id="modal-guide" class="modal-overlay">
+    <div class="modal-box" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-circle-question" style="color: var(--primary);"></i> Cách lấy Token GHN Tra Cứu Nội Bộ</h3>
+        <button id="btn-close-guide" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body">
+        
+        <!-- Step 1 -->
+        <div class="guide-step">
+          <div class="guide-step-num">1</div>
+          <div>
+            <strong>Đăng nhập vào GHN Tra Cứu Nội Bộ</strong>
+            <p style="color: var(--text-muted); font-size: 12.5px;">
+              Mở trang <a href="https://tracuunoibo.ghn.vn/internal/revert" target="_blank" style="color: var(--primary); font-weight: 600;">tracuunoibo.ghn.vn</a> trên trình duyệt và đăng nhập tài khoản nhân viên của bạn.
+            </p>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="guide-step">
+          <div class="guide-step-num">2</div>
+          <div>
+            <strong>Cách 1: Lấy Token tự động bằng 1 dòng lệnh Console (Nhanh nhất)</strong>
+            <p style="color: var(--text-muted); font-size: 12.5px;">
+              Tại trang GHN, bấm phím <kbd style="background: #f1f5f9; padding: 2px 5px; border-radius: 4px; border: 1px solid #cbd5e1;">F12</kbd> (hoặc chuột phải chọn <em>Kiểm tra</em>), chuyển sang tab <strong>Console</strong>, dán đoạn lệnh sau và bấm Enter:
+            </p>
+            <div class="code-box">
+              <span>copy(localStorage.getItem('token') || sessionStorage.getItem('token'));</span>
+              <button type="button" onclick="navigator.clipboard.writeText('copy(localStorage.getItem(\'token\') || sessionStorage.getItem(\'token\'));'); alert('Đã copy lệnh!');">
+                Copy lệnh
+              </button>
+            </div>
+            <p style="color: #059669; font-size: 12px; font-weight: 600;">
+              ✓ Sau khi ấn Enter, Token sẽ tự động được copy vào bộ nhớ tạm của bạn!
+            </p>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="guide-step">
+          <div class="guide-step-num">3</div>
+          <div>
+            <strong>Cách 2: Sử dụng Bookmarklet (1 chạm trên thanh dấu trang)</strong>
+            <p style="color: var(--text-muted); font-size: 12.5px;">
+              Kéo nút bên dưới thả vào thanh Dấu trang (Bookmarks bar) của trình duyệt. Khi đang ở trang tracuunoibo.ghn.vn, chỉ cần bấm vào bookmark này là token tự động copy:
+            </p>
+            <div style="margin-top: 8px;">
+              <a href="javascript:(function(){var t=localStorage.getItem('token')||sessionStorage.getItem('token');if(t){navigator.clipboard.writeText(t).then(function(){alert('Đã copy Token GHN thành công! Hãy dán vào ô Token.');});}else{alert('Không tìm thấy Token. Hãy đảm bảo bạn đã đăng nhập tracuunoibo.ghn.vn');}})();" 
+                 class="btn btn-outline btn-sm" style="border: 1.5px dashed var(--primary); color: var(--primary);">
+                ⭐ Kéo tôi vào Bookmark Bar: "Lấy Token GHN"
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="guide-step">
+          <div class="guide-step-num">4</div>
+          <div>
+            <strong>Dán vào ô Token và bấm "Lưu & Kết Nối"</strong>
+            <p style="color: var(--text-muted); font-size: 12.5px;">
+              Quay lại trang này, dán token vào ô trên cùng. Token sẽ được lưu an toàn trong trình duyệt của bạn cho các lần sử dụng tiếp theo.
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button id="btn-guide-ok" class="btn btn-primary">Đã hiểu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SELECT WARD ADDRESS MODAL (CHỌN PHƯỜNG/XÃ ĐÚNG) -->
+  <div id="modal-select-ward" class="modal-overlay">
+    <div class="modal-box modal-ward-box">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-location-dot" style="color: var(--primary);"></i> Chọn phường/xã đúng</h3>
+        <button id="btn-close-ward-modal" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="ward-modal-top">
+          <span class="ward-modal-desc">Hệ thống dựa vào phường/xã được chọn để tự xác định kho phù hợp</span>
+          <div class="address-mode-switch" id="address-mode-switch">
+            <div class="address-mode-item active" data-mode="old">Địa chỉ cũ</div>
+            <div class="address-mode-item" data-mode="new">Địa chỉ mới</div>
+          </div>
+        </div>
+
+        <!-- Mode: Địa chỉ cũ (3 cấp: Tỉnh - Quận - Phường) -->
+        <div id="ward-grid-old" class="ward-selects-grid-old">
+          <!-- Tỉnh - Thành phố -->
+          <div>
+            <div class="ward-field-label">Tỉnh - Thành phố<span class="req">*</span></div>
+            <div class="ward-custom-select" id="select-wrap-old-province">
+              <div class="ward-select-input-wrap">
+                <input type="text" id="input-old-province" class="ward-select-input" placeholder="Tìm kiếm Tỉnh - Thành phố" autocomplete="off" />
+                <i class="fa-solid fa-chevron-down ward-select-arrow"></i>
+              </div>
+              <div id="dropdown-old-province" class="ward-select-dropdown"></div>
+            </div>
+          </div>
+
+          <!-- Quận - Huyện -->
+          <div>
+            <div class="ward-field-label">Quận - Huyện<span class="req">*</span></div>
+            <div class="ward-custom-select" id="select-wrap-old-district">
+              <div class="ward-select-input-wrap">
+                <input type="text" id="input-old-district" class="ward-select-input" placeholder="Chọn Quận - Huyện" autocomplete="off" disabled />
+                <i class="fa-solid fa-chevron-down ward-select-arrow"></i>
+              </div>
+              <div id="dropdown-old-district" class="ward-select-dropdown"></div>
+            </div>
+          </div>
+
+          <!-- Phường - Xã -->
+          <div>
+            <div class="ward-field-label">Phường - Xã<span class="req">*</span></div>
+            <div class="ward-custom-select" id="select-wrap-old-ward">
+              <div class="ward-select-input-wrap">
+                <input type="text" id="input-old-ward" class="ward-select-input" placeholder="Chọn Phường - Xã" autocomplete="off" disabled />
+                <i class="fa-solid fa-chevron-down ward-select-arrow"></i>
+              </div>
+              <div id="dropdown-old-ward" class="ward-select-dropdown"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mode: Địa chỉ mới (2 cấp: Tỉnh - Phường sau sáp nhập) -->
+        <div id="ward-grid-new" class="ward-selects-grid-new" style="display: none;">
+          <!-- Tỉnh - Thành phố -->
+          <div>
+            <div class="ward-field-label">Tỉnh - Thành phố<span class="req">*</span></div>
+            <div class="ward-custom-select" id="select-wrap-new-province">
+              <div class="ward-select-input-wrap">
+                <input type="text" id="input-new-province" class="ward-select-input" placeholder="Tìm kiếm Tỉnh - Thành phố" autocomplete="off" />
+                <i class="fa-solid fa-chevron-down ward-select-arrow"></i>
+              </div>
+              <div id="dropdown-new-province" class="ward-select-dropdown"></div>
+            </div>
+          </div>
+
+          <!-- Phường - Xã -->
+          <div>
+            <div class="ward-field-label">Phường - Xã<span class="req">*</span></div>
+            <div class="ward-custom-select" id="select-wrap-new-ward">
+              <div class="ward-select-input-wrap">
+                <input type="text" id="input-new-ward" class="ward-select-input" placeholder="Chọn Phường - Xã" autocomplete="off" disabled />
+                <i class="fa-solid fa-chevron-down ward-select-arrow"></i>
+              </div>
+              <div id="dropdown-new-ward" class="ward-select-dropdown"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Address Preview Bar -->
+        <div id="ward-address-preview" class="ward-address-preview empty">
+          <i class="fa-solid fa-location-dot"></i>
+          <span id="ward-address-preview-text">Chọn đầy đủ các cấp địa chỉ để xác nhận</span>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btn-cancel-ward-modal" class="btn btn-secondary">Hủy</button>
+        <button id="btn-confirm-ward-modal" class="btn btn-primary" disabled>
+          <i class="fa-solid fa-check"></i> Xác nhận
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CLOUD SYNC SETTINGS MODAL -->
+  <div id="modal-sync" class="modal-overlay">
+    <div class="modal-box" style="max-width: 650px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-cloud-arrow-down" style="color: var(--primary);"></i> Tự Động Kết Nối & Đồng Bộ Token</h3>
+        <button id="btn-close-sync" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Tampermonkey Local Auto-Bridge Status -->
+        <div id="tm-bridge-banner" style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 12.5px; color: #065f46;">
+          <div style="font-weight: 700; margin-bottom: 4px;">
+            <i class="fa-solid fa-bolt"></i> Cách 1: Tự động bắt Token trực tiếp qua Tampermonkey (Khuyên dùng)
+          </div>
+          <div id="tm-bridge-status-text">
+            Chỉ cần cài file <code>ghn_revert_kho.user.js</code> vào Tampermonkey. Mỗi khi bạn mở <strong>tracuunoibo.ghn.vn</strong>, script sẽ tự động truyền Token sang trang web này và đẩy lên Cloud (kể cả Token UUID 36 ký tự).
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="form-label" for="sync-url-input">
+            <span>Cách 2: URL Đồng Bộ Cloud Cho Đội Ngũ (Google Apps Script):</span>
+          </label>
+          <input 
+            type="text" 
+            id="sync-url-input" 
+            class="combobox-input" 
+            style="font-family: monospace; font-size: 12.5px; padding-left: 14px;"
+            placeholder="https://script.google.com/macros/s/.../exec" 
+          />
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex-wrap: wrap; gap: 8px;">
+            <span id="sync-status-detail" style="font-size: 12px; color: var(--text-muted);">Trạng thái: Chưa cấu hình</span>
+            <div style="display: flex; gap: 6px;">
+              <button id="btn-push-sync-url" class="btn btn-secondary btn-sm" title="Đẩy Token đang có ở ô nhập lên Cloud cho đội ngũ">
+                <i class="fa-solid fa-cloud-arrow-up"></i> Đẩy Token lên Cloud
+              </button>
+              <button id="btn-test-sync-url" class="btn btn-outline btn-sm" title="Tải Token mới nhất từ Cloud về">
+                <i class="fa-solid fa-cloud-arrow-down"></i> Tải Token về
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 14px; font-size: 12.5px; line-height: 1.6;">
+          <strong style="color: #0f172a; display: block; margin-bottom: 6px;">
+            <i class="fa-brands fa-google"></i> Hướng dẫn tạo Link Google Apps Script miễn phí vĩnh viễn (1 phút):
+          </strong>
+          <ol style="padding-left: 18px; margin-bottom: 8px; color: #334155;">
+            <li>Truy cập <a href="https://script.google.com" target="_blank" style="color: var(--primary); font-weight: 600;">script.google.com</a> và bấm <strong>Dự án mới (New Project)</strong>.</li>
+            <li>Xóa toàn bộ mã cũ, bấm nút <strong>Copy Mã Script</strong> bên dưới dán vào và bấm <strong>Lưu (Ctrl+S)</strong>.</li>
+            <li>Bấm nút <strong>Triển khai (Deploy)</strong> ở góc trên bên phải &gt; chọn <strong>Tùy chọn triển khai mới (New deployment)</strong>.</li>
+            <li>Chọn loại: <strong>Ứng dụng web (Web app)</strong>. Tại mục <em>Ai có quyền truy cập (Who has access)</em>, chọn <strong>Bất kỳ ai (Anyone)</strong>.</li>
+            <li>Bấm <strong>Triển khai</strong> và sao chép đường link <code>https://script.google.com/macros/s/.../exec</code> dán vào ô bên trên!</li>
+          </ol>
+
+          <div class="code-box">
+            <span style="font-size: 11px;">Mã nguồn Google Apps Script v2 (Hỗ trợ chống lỗi CORS &amp; Redirect):</span>
+            <button type="button" id="btn-copy-gas-code">Copy Mã Script</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btn-cancel-sync" class="btn btn-secondary">Đóng</button>
+        <button id="btn-save-sync-url" class="btn btn-primary">
+          <i class="fa-solid fa-floppy-disk"></i> Lưu Cấu Hình
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load pre-bundled warehouses data -->
+  <script src="warehouses.data.js"></script>
+
+  <!-- Main Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
