@@ -1,61 +1,28 @@
-# GHN Revert Hub - Công Cụ Cập Nhật Kho Đơn Hàng GHN
+# GHN Revert Hub - Công Cụ Đổi Kho GHN Trực Tuyến (v4.0)
 
-Ứng dụng web trực tuyến hỗ trợ chuyển đổi kho hàng loạt cho các đơn hàng thông qua hệ thống **GHN Tra Cứu Nội Bộ** (`https://tracuunoibo.ghn.vn/internal/revert`).
+Ứng dụng web trực tuyến hỗ trợ chuyển đổi kho hàng loạt cho các đơn hàng thông qua hệ thống **GHN Tra Cứu Nội Bộ** (`https://tracuunoibo.ghn.vn/internal/revert`) kết hợp máy chủ bảo mật Google Apps Script và ghi log Google Sheet.
 
----
-
-## 🌟 Các Tính Năng Nổi Bật
-
-1. **Kết nối trực tiếp API GHN**:
-   - Sử dụng chính xác endpoint nội bộ của GHN: `https://fe-online-gateway.ghn.vn/order-tracking/public-api/internal/update-orders-warehouse`.
-   - Chạy được trực tiếp trên trình duyệt mọi nơi (mở file `index.html` hoặc đưa lên GitHub Pages, Vercel, Netlify) vì hệ thống GHN đã cấu hình `Access-Control-Allow-Origin: *`.
-2. **Quản lý Token thông minh**:
-   - Nhập Token một lần, tự động lưu trong `localStorage`.
-   - Tự động kiểm tra tính hợp lệ và hiển thị thông tin nhân viên (Tên, Mã nhân viên).
-3. **Đầy đủ 4 tùy chọn kho**:
-   - 🚚 **Kho Giao** (`Deliver` - value: `3`)
-   - 🏢 **Kho Hiện Tại** (`Current` - value: `1`)
-   - 📦 **Kho Lấy** (`Pick` - value: `2`)
-   - 🔄 **Kho Trả** (`Return` - value: `4`)
-4. **Tìm kiếm hơn 1.650 bưu cục toàn quốc**:
-   - Tìm kiếm thời gian thực theo Tên bưu cục, Mã kho (ID), hoặc Địa chỉ / Tỉnh thành.
-   - Dữ liệu kho được lưu sẵn trong `warehouses.data.js` và tự động đồng bộ khi có kết nối mạng.
-5. **Chuẩn hóa danh mục lý do đổi kho**:
-   - Khu vực giáp ranh với BC khác gần hơn (`area_closer_to_other_bc`)
-   - Chuyển BC khác hỗ trợ quá tải (`overload_support_other_bc`)
-   - Chuyển về BC mới mở (`newly_opened_bc`)
-   - Sai cân nặng kích thước chuyển về đúng BC phụ trách (`wrong_weight_dimension_correct_bc`)
-   - Địa chỉ nằm ở khu vực BC khác phụ trách (`address_other_bc`)
-   - Lý do khác (`other_reason`) kèm ô nhập diễn giải chi tiết.
-6. **Xử lý đơn hàng loạt an toàn**:
-   - Tự động chuẩn hóa mã đơn, lọc trùng lặp, hỗ trợ dán trực tiếp từ cột Excel hoặc tải file `.xlsx`, `.csv`.
-   - Hỗ trợ chia gói (batching: 30 / 50 / 100 đơn/lượt) kèm thanh tiến trình và nút dừng khẩn cấp.
-7. **Báo cáo kết quả & Xuất Excel**:
-   - Phân loại 3 nhóm: Thành công / Chờ duyệt Eform / Thất bại.
-   - Xuất file `.xlsx` đầy đủ thông tin đối soát.
+- **Trang web trực tuyến**: [https://tuanlthb.github.io/revert/](https://tuanlthb.github.io/revert/)
+- **Bảng Nhật Ký Google Sheet**: [https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing](https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing)
+- **Máy chủ trung gian Google Apps Script**: `https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec`
 
 ---
 
-## 🚀 Cách Sử Dụng
+## 🌟 Tính Năng Nổi Bật v4.0
 
-### Bước 1: Mở ứng dụng
-- Bạn có thể mở trực tiếp file `d:\Revert\index.html` bằng trình duyệt Chrome, Edge, Cốc Cốc,...
-- Hoặc deploy thư mục này lên bất kỳ hosting tĩnh miễn phí nào (GitHub Pages, Vercel, Cloudflare Pages).
-
-### Bước 2: Lấy Token GHN
-Có 2 cách đơn giản nhất:
-- **Cách 1**: Đăng nhập `tracuunoibo.ghn.vn`, nhấn `F12` -> tab **Console** -> gõ:
-  ```javascript
-  copy(localStorage.getItem('token') || sessionStorage.getItem('token'));
-  ```
-  Nhấn `Enter`, token sẽ được copy vào clipboard.
-- **Cách 2**: Cài đặt Userscript bổ trợ `ghn_revert_kho.user.js` vào Tampermonkey. Khi vào trang GHN, nhấn nút nổi "Revert Kho Nhanh" để copy token tự động.
-
-### Bước 3: Dán Token và Thao tác
-1. Dán token vào ô Token trên cùng và bấm **"Lưu & Kết Nối"**.
-2. Dán danh sách đơn hàng vào ô số 1 (hoặc bấm nút "File" để tải file Excel lên).
-3. Chọn loại kho muốn cập nhật (Kho Giao / Kho Hiện Tại / Kho Lấy / Kho Trả).
-4. Tìm và chọn kho chuyển sang tại ô số 2.
-5. Chọn lý do đổi kho.
-6. Bấm nút **"CẬP NHẬT KHO"** và xác nhận trên hộp thoại.
-7. Theo dõi tiến trình và tải báo cáo Excel khi hoàn tất.
+1. **Bảo Mật Token Quản Lý Tuyệt Đối**:
+   - Token GHN của Quản lý được giữ an toàn trên Google Apps Script, trình duyệt của nhân viên **không bao giờ nhận Token thô**.
+   - Mọi máy tính của nhân viên khi vào web đều thao tác được qua máy chủ trung gian mà không cần cài extension hay lấy token thủ công.
+2. **Nút BẬT / TẮT Chia Sẻ Token**:
+   - Quản lý có công tắc **BẬT / TẮT CHIA SẺ** ngay trên Widget Tampermonkey tại `tracuunoibo.ghn.vn` và trên web.
+   - Khi TẮT: hệ thống lập tức chặn toàn bộ nhân viên thao tác.
+3. **Cơ Chế Đăng Nhập & Ghi Nhật Ký Google Sheet**:
+   - Bắt buộc nhân viên đăng nhập trước khi sử dụng.
+   - Tự động ghi lại lịch sử thao tác vào tab `NhatKyDoiKho` trên Google Sheet với các cột:
+     `STT`, `Tài khoản`, `Họ tên`, `Mã đơn`, `Đổi kho từ kho nào đến kho nào`, `Thời gian`, `Loại kho cập nhật`, `Kho đích (mới)`, `Kho ban đầu (cũ)`, `Lý do đổi kho`, `Kết quả`, `Chi tiết / Mã Eform`, `Mã phiên`, `Thiết bị`.
+4. **Chọn Phường/Xã Đúng (Hệ Thống Tự Chọn Kho)**:
+   - Hỗ trợ cả 2 chuẩn địa chỉ GHN: Địa chỉ cũ (3 cấp: Tỉnh -> Quận -> Phường) và Địa chỉ mới V3 (2 cấp: Tỉnh -> Phường).
+   - Tự động tra cứu và điền kho phụ trách theo đúng quy định của GHN.
+5. **Giao Diện Chuẩn Hóa**:
+   - Đã ẩn hoàn toàn ô nhập / hiển thị Token thô.
+   - Chỉ hiển thị trạng thái kết nối Token GHN trực quan và thông tin nhân viên đang đăng nhập.

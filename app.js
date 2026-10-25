@@ -46,13 +46,19 @@
     'other_reason': 'Lý do khác'
   };
 
-  // --- FIXED DEFAULT TOKEN & SYNC URL ---
+  // --- GATEWAY & SHEET URLS ---
+  const API_GATEWAY_URL = 'https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec';
+  const SHEET_LOG_URL = 'https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing';
+  const GOOGLE_CLIENT_ID = '';
+
+  // Token dự phòng (chế độ phát triển nội bộ)
   const FIXED_DEFAULT_TOKEN = 'ed19b5b2-74a1-42f5-bdd3-d3deecd16278';
-  // URL Google Apps Script cố định để mọi nhân viên mở web đều tự động tải Token mà không cần cấu hình
-  const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec';
 
   // --- APPLICATION STATE ---
   const state = {
+    session: '',
+    authUser: null,
+    gateway: null,
     token: FIXED_DEFAULT_TOKEN,
     isTokenValid: false,
     user: null,
@@ -94,17 +100,23 @@
 
   // --- DOM ELEMENTS ---
   const els = {
-    tokenInput: document.getElementById('token-input'),
-    btnToggleToken: document.getElementById('btn-toggle-token'),
-    btnSaveToken: document.getElementById('btn-save-token'),
-    btnCheckToken: document.getElementById('btn-check-token'),
+    // Header & Hub Connection Panel
     tokenPill: document.getElementById('token-pill'),
     tokenStatusText: document.getElementById('token-status-text'),
-    userInfoBadge: document.getElementById('user-info-badge'),
+    hubConnectionPill: document.getElementById('hub-connection-pill'),
+    hubConnectionText: document.getElementById('hub-connection-text'),
+    hubShareBadge: document.getElementById('hub-share-badge'),
+    loggedUserWrap: document.getElementById('logged-user-wrap'),
     userAvatarText: document.getElementById('user-avatar-text'),
     userFullName: document.getElementById('user-fullname'),
     userIdCode: document.getElementById('user-id-code'),
+    btnLogout: document.getElementById('btn-logout'),
+    btnOpenAdmin: document.getElementById('btn-open-admin'),
+    btnRefreshStatus: document.getElementById('btn-refresh-status'),
+    gatewayBanner: document.getElementById('gateway-banner'),
+    gatewayBannerText: document.getElementById('gateway-banner-text'),
 
+    // Orders Input
     ordersTextarea: document.getElementById('orders-textarea'),
     orderCounterBadge: document.getElementById('order-counter-badge'),
     btnPasteClipboard: document.getElementById('btn-paste-clipboard'),
@@ -142,6 +154,7 @@
     wardAddressPreview: document.getElementById('ward-address-preview'),
     wardAddressPreviewText: document.getElementById('ward-address-preview-text'),
 
+    // Warehouse Combobox
     whSearchInput: document.getElementById('wh-search-input'),
     whClearBtn: document.getElementById('wh-clear-btn'),
     whDropdown: document.getElementById('wh-dropdown'),
@@ -204,19 +217,25 @@
     btnCloseGuide: document.getElementById('btn-close-guide'),
     btnGuideOk: document.getElementById('btn-guide-ok'),
 
-    modalSync: document.getElementById('modal-sync'),
-    btnOpenSyncModal: document.getElementById('btn-open-sync-modal'),
-    btnCloseSync: document.getElementById('btn-close-sync'),
-    btnCancelSync: document.getElementById('btn-cancel-sync'),
-    btnSaveSyncUrl: document.getElementById('btn-save-sync-url'),
-    btnTestSyncUrl: document.getElementById('btn-test-sync-url'),
-    btnPushSyncUrl: document.getElementById('btn-push-sync-url'),
-    syncUrlInput: document.getElementById('sync-url-input'),
-    syncStatusDetail: document.getElementById('sync-status-detail'),
-    btnCopyGasCode: document.getElementById('btn-copy-gas-code'),
-    cloudSyncInfoPill: document.getElementById('cloud-sync-info-pill'),
-    cloudSyncInfoText: document.getElementById('cloud-sync-info-text'),
-    tmBridgeStatusText: document.getElementById('tm-bridge-status-text'),
+    // Login Overlay
+    loginOverlay: document.getElementById('login-overlay'),
+    loginForm: document.getElementById('login-form'),
+    loginUsername: document.getElementById('login-username'),
+    loginPassword: document.getElementById('login-password'),
+    loginError: document.getElementById('login-error'),
+    btnLoginSubmit: document.getElementById('btn-login-submit'),
+    googleLoginWrap: document.getElementById('google-login-wrap'),
+    googleLoginBtn: document.getElementById('google-login-btn'),
+
+    // Admin Modal
+    modalAdmin: document.getElementById('modal-admin'),
+    btnCloseAdmin: document.getElementById('btn-close-admin'),
+    btnCloseAdminFooter: document.getElementById('btn-close-admin-footer'),
+    adminShareToggle: document.getElementById('admin-share-toggle'),
+    adminShareLabel: document.getElementById('admin-share-label'),
+    adminTokenInfo: document.getElementById('admin-token-info'),
+    adminTokenInput: document.getElementById('admin-token-input'),
+    btnAdminPushToken: document.getElementById('btn-admin-push-token'),
 
     toastContainer: document.getElementById('toast-container')
   };
@@ -264,451 +283,423 @@
       .toLowerCase();
   }
 
-  // --- TOKEN HANDLING & AUTOMATIC SYNC ---
-  const GAS_CODE_SNIPPET = `function doGet(e) {
-  var props = PropertiesService.getScriptProperties();
-  if (e && e.parameter && e.parameter.token) {
-    var newTok = String(e.parameter.token).trim();
-    props.setProperty('GHN_TOKEN', newTok);
-    props.setProperty('UPDATED_AT', new Date().toISOString());
-    return ContentService.createTextOutput(JSON.stringify({ code: 200, message: 'Updated', token: newTok }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  var token = props.getProperty('GHN_TOKEN') || '';
-  var updatedAt = props.getProperty('UPDATED_AT') || '';
-  return ContentService.createTextOutput(JSON.stringify({ code: 200, token: token, updated_at: updatedAt }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+  // ==========================================================================
+  // AUTH & GATEWAY (ĐĂNG NHẬP + MÁY CHỦ TRUNG GIAN GOOGLE APPS SCRIPT)
+  // Token GHN của Quản lý được giữ trên máy chủ, trình duyệt KHÔNG bao giờ nhận Token.
+  // ==========================================================================
+  const SESSION_STORAGE_KEY = 'ghn_hub_session';
 
-function doPost(e) {
-  try {
-    var props = PropertiesService.getScriptProperties();
-    var raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
-    var data = JSON.parse(raw);
-    var tok = data.token || (e && e.parameter && e.parameter.token) || '';
-    if (tok) {
-      props.setProperty('GHN_TOKEN', String(tok).trim());
-      props.setProperty('UPDATED_AT', new Date().toISOString());
-      return ContentService.createTextOutput(JSON.stringify({ code: 200, message: 'Updated' }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    return ContentService.createTextOutput(JSON.stringify({ code: 400, message: 'Missing token' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ code: 500, error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-
-  function getConfiguredSyncUrl() {
-    return (localStorage.getItem('ghn_sync_url') || DEFAULT_SYNC_URL || '').trim();
+  function getDeviceInfo() {
+    const ua = navigator.userAgent || '';
+    let browser = 'Trình duyệt';
+    if (/Edg\//.test(ua)) browser = 'Edge';
+    else if (/Chrome\//.test(ua)) browser = 'Chrome';
+    else if (/Firefox\//.test(ua)) browser = 'Firefox';
+    else if (/Safari\//.test(ua)) browser = 'Safari';
+    let os = '';
+    if (/Windows/.test(ua)) os = 'Windows';
+    else if (/Android/.test(ua)) os = 'Android';
+    else if (/iPhone|iPad/.test(ua)) os = 'iOS';
+    else if (/Mac OS/.test(ua)) os = 'macOS';
+    return `${browser}${os ? ' / ' + os : ''}`;
   }
 
-  async function initToken() {
-    // 1. Check URL query / hash for ?token=...
-    let receivedFromUrl = false;
+  async function gasCall(action, payload = {}) {
+    const body = Object.assign({ action, session: state.session || '', device: getDeviceInfo() }, payload);
+    let res;
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlToken = urlParams.get('token') || new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token');
-      if (urlToken && urlToken.trim().length >= 10) {
-        const cleanUrlTok = urlToken.trim().replace(/^["']+|["']+$/g, '');
-        if (cleanUrlTok !== FIXED_DEFAULT_TOKEN) {
-          localStorage.setItem('ghn_revert_token', cleanUrlTok);
-          localStorage.setItem('ghn_bridged_token', cleanUrlTok);
-          receivedFromUrl = true;
-          addLog('✓ Đã nhận Token mới truyền trực tiếp từ đường dẫn URL.');
-        }
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
-    } catch (_) {}
-
-    // 2. Listen for Tampermonkey Auto-Bridge events (CustomEvent & window.postMessage across isolated worlds)
-    window.addEventListener('ghn-token-bridged', (e) => {
-      const detail = (e && e.detail) || {};
-      if (detail.token && detail.token.trim().length >= 10) {
-        handleBridgedToken(detail.token.trim(), detail.updatedAt);
-      }
-    });
-
-    window.addEventListener('message', (ev) => {
-      const data = ev && ev.data;
-      if (data && data.type === 'GHN_TOKEN_BRIDGED' && data.token) {
-        handleBridgedToken(String(data.token).trim(), data.updatedAt);
-      }
-    });
-
-    // Also listen for BroadcastChannel from companion tab
-    try {
-      const bc = new BroadcastChannel('ghn_revert_token_channel');
-      bc.onmessage = (ev) => {
-        if (ev.data && ev.data.token) {
-          handleBridgedToken(String(ev.data.token).trim(), ev.data.updatedAt);
-        }
-      };
-    } catch (_) {}
-
-    // 3. Determine initial candidate tokens in priority order
-    const domAttrToken = document.documentElement.getAttribute('data-ghn-bridged-token');
-    const bridgedToken = domAttrToken || window.__GHN_BRIDGED_TOKEN__ || localStorage.getItem('ghn_bridged_token');
-    const ghnPageToken = localStorage.getItem('token') || sessionStorage.getItem('token') || localStorage.getItem('ghn_extracted_token');
-    const savedRevertToken = localStorage.getItem('ghn_revert_token');
-
-    // Avoid getting stuck on the expired default token if another token exists
-    const candidates = [
-      (bridgedToken && bridgedToken !== FIXED_DEFAULT_TOKEN) ? bridgedToken : null,
-      (ghnPageToken && ghnPageToken !== FIXED_DEFAULT_TOKEN) ? ghnPageToken : null,
-      (savedRevertToken && savedRevertToken !== FIXED_DEFAULT_TOKEN) ? savedRevertToken : null,
-      FIXED_DEFAULT_TOKEN
-    ].filter(t => t && String(t).trim().length >= 10);
-
-    const initialToken = (candidates[0] || FIXED_DEFAULT_TOKEN).trim().replace(/^["']+|["']+$/g, '');
-    state.token = initialToken;
-    els.tokenInput.value = initialToken;
-
-    const syncUrl = getConfiguredSyncUrl();
-    if (syncUrl) {
-      els.syncUrlInput.value = syncUrl;
-    }
-
-    // 4. Validate the initial token
-    const isValid = await checkTokenValidity(initialToken, receivedFromUrl);
-
-    // 5. If initial token is invalid or Cloud Sync is configured, try Cloud Sync automatically
-    if (syncUrl) {
-      if (!isValid) {
-        addLog('Đang tự động tải Token mới nhất từ Google Script Cloud Sync...');
-        await fetchTokenFromCloudSync(syncUrl, false);
-      } else {
-        // Valid local token! Push it to Cloud so all team members get the latest live token
-        syncWithCloudBidirectional(syncUrl, initialToken);
-      }
-    }
-  }
-
-  async function handleBridgedToken(newToken, updatedAt) {
-    const cleanTok = String(newToken || '').trim().replace(/^["']+|["']+$/g, '');
-    if (!cleanTok || cleanTok.length < 10 || cleanTok === FIXED_DEFAULT_TOKEN) return;
-    localStorage.setItem('ghn_bridged_token', cleanTok);
-
-    if (els.tmBridgeStatusText) {
-      const timeLabel = updatedAt ? new Date(updatedAt).toLocaleString('vi-VN') : 'Vừa xong';
-      els.tmBridgeStatusText.innerHTML = `<strong style="color:#047857;">✓ Đã kết nối cầu nối Tampermonkey!</strong> Token tự động nhận từ tracuunoibo.ghn.vn lúc ${timeLabel}.`;
-    }
-
-    if (cleanTok !== state.token || !state.isTokenValid) {
-      state.token = cleanTok;
-      els.tokenInput.value = cleanTok;
-      addLog(`⚡ Đã tự động nhận Token mới từ Tampermonkey (tracuunoibo.ghn.vn): ${cleanTok.slice(0, 8)}...`);
-      const ok = await checkTokenValidity(cleanTok, false);
-      if (ok) {
-        if (els.cloudSyncInfoPill) {
-          els.cloudSyncInfoPill.style.display = 'inline-flex';
-          els.cloudSyncInfoText.textContent = 'Đã tự động bắt Token từ tracuunoibo.ghn.vn';
-        }
-      }
-    }
-  }
-
-  async function syncWithCloudBidirectional(syncUrl, currentValidToken) {
-    if (!syncUrl) return;
-    const lastPushed = localStorage.getItem('ghn_last_pushed_cloud_token');
-    if (currentValidToken && currentValidToken !== FIXED_DEFAULT_TOKEN && currentValidToken !== lastPushed) {
-      await pushTokenToCloudSync(syncUrl, currentValidToken, false);
-    }
-  }
-
-  async function fetchTokenFromCloudSync(syncUrl, isManual = false) {
-    const cleanUrl = (syncUrl || DEFAULT_SYNC_URL || '').trim();
-    if (!cleanUrl) {
-      if (isManual) showToast('Vui lòng nhập URL Google Apps Script trước!', 'error');
-      return false;
-    }
-
-    if (isManual) showToast('Đang tải Token mới nhất từ Cloud...', 'info');
-    if (els.syncStatusDetail) {
-      els.syncStatusDetail.textContent = 'Trạng thái: Đang kết nối tới Cloud...';
-      els.syncStatusDetail.style.color = '#0284c7';
-    }
-
-    try {
-      // Cache-buster query param & no custom headers to avoid CORS preflight on Google Apps Script
-      const sep = cleanUrl.includes('?') ? '&' : '?';
-      const fetchUrl = `${cleanUrl}${sep}_t=${Date.now()}`;
-
-      const res = await fetch(fetchUrl, {
-        method: 'GET',
-        redirect: 'follow'
+      // text/plain => không phát sinh CORS preflight với Google Apps Script
+      res = await fetch(API_GATEWAY_URL, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(body)
       });
+    } catch (err) {
+      throw new Error('Không kết nối được máy chủ trung gian. Kiểm tra mạng và thử lại.');
+    }
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      throw new Error('Máy chủ trung gian chưa được triển khai đúng (phản hồi không phải JSON).');
+    }
+
+    if (!data.ok) {
+      const err = new Error(data.message || 'Lỗi máy chủ trung gian');
+      err.code = data.code;
+      if (data.code === 401 && action !== 'login' && action !== 'loginGoogle') {
+        handleSessionExpired(data.message);
       }
+      throw err;
+    }
+    return data;
+  }
 
-      const text = await res.text();
-      let data = null;
+  /**
+   * Gọi API GHN thông qua máy chủ trung gian. Trả về đối tượng giống Response ({ ok, json() }).
+   */
+  async function ghnFetch(url, options = {}) {
+    const u = new URL(url);
+    const query = {};
+    u.searchParams.forEach((v, k) => { query[k] = v; });
+    let body;
+    if (options.body) {
+      try { body = JSON.parse(options.body); } catch (_) { body = {}; }
+    }
+    const result = await gasCall('proxy', {
+      method: (options.method || 'GET').toUpperCase(),
+      path: u.pathname,
+      query,
+      body
+    });
+    return {
+      ok: result.status >= 200 && result.status < 300,
+      status: result.status,
+      json: async () => result.data
+    };
+  }
+
+  /**
+   * Gọi API GHN thông minh: nếu có phiên máy chủ thì định tuyến qua proxy (được đính kèm Token quản lý)
+   */
+  async function ghnApiFetch(url, options = {}) {
+    const isInternal = url.includes('/internal/') || url.includes('/v3/');
+    if (state.session && (isInternal || !state.token)) {
       try {
-        data = JSON.parse(text);
-      } catch (_) {
-        throw new Error('URL không trả về đúng định dạng JSON. Hãy kiểm tra quyền truy cập "Bất kỳ ai (Anyone)" khi Deploy Google Script.');
-      }
-
-      if (data && data.token && String(data.token).trim().length >= 10) {
-        const remoteToken = String(data.token).trim().replace(/^["']+|["']+$/g, '');
-        const timeStr = data.updated_at ? new Date(data.updated_at).toLocaleString('vi-VN') : 'Vừa xong';
-
-        // If we already have a valid local token and Cloud has the expired default token, push our valid token instead!
-        if (remoteToken === FIXED_DEFAULT_TOKEN && state.isTokenValid && state.token && state.token !== FIXED_DEFAULT_TOKEN) {
-          addLog('Token trên Cloud đang là bản mặc định cũ, hệ thống tự động đẩy Token sống hiện tại lên Cloud...');
-          return await pushTokenToCloudSync(cleanUrl, state.token, isManual);
+        const u = new URL(url);
+        const query = {};
+        u.searchParams.forEach((v, k) => { query[k] = v; });
+        let body = null;
+        if (options.body) {
+          try { body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body; } catch (_) {}
         }
-
-        state.token = remoteToken;
-        els.tokenInput.value = remoteToken;
-
-        addLog(`Đã tải Token từ Cloud (${timeStr}): ${remoteToken.slice(0, 8)}...`);
-        const valid = await checkTokenValidity(remoteToken, false);
-
-        if (valid) {
-          if (els.cloudSyncInfoPill) {
-            els.cloudSyncInfoPill.style.display = 'inline-flex';
-            els.cloudSyncInfoText.textContent = `Đã đồng bộ tự động từ Cloud (${timeStr})`;
-          }
-          if (els.syncStatusDetail) {
-            els.syncStatusDetail.textContent = `✓ Đã tải & kết nối Token hợp lệ từ Cloud (${timeStr})`;
-            els.syncStatusDetail.style.color = '#059669';
-          }
-          if (isManual) {
-            showToast('Đã đồng bộ và kết nối Token từ Cloud thành công!', 'success');
-          }
-          return true;
-        } else {
-          // Token on Cloud is expired! Tell the user clearly why and how to push a fresh one
-          const expMsg = `Token đang lưu trên Cloud (${remoteToken.slice(0, 8)}...) đã hết hạn! Hãy mở tracuunoibo.ghn.vn để tự động đẩy Token mới lên Cloud.`;
-          if (els.syncStatusDetail) {
-            els.syncStatusDetail.textContent = `⚠️ ${expMsg}`;
-            els.syncStatusDetail.style.color = '#dc2626';
-          }
-          if (els.cloudSyncInfoPill) {
-            els.cloudSyncInfoPill.style.display = 'inline-flex';
-            els.cloudSyncInfoText.textContent = `Token trên Cloud đã hết hạn - Cần mở tracuunoibo.ghn.vn để làm mới`;
-          }
-          addLog(`⚠️ ${expMsg}`, true);
-          if (isManual) {
-            showToast(expMsg, 'error', 6000);
-          }
-          return false;
-        }
-      } else {
-        // Cloud currently has no token stored yet. If we have a valid token locally, push it!
-        if (state.isTokenValid && state.token && state.token !== FIXED_DEFAULT_TOKEN) {
-          addLog('Cloud chưa có Token, đang tự động đẩy Token hợp lệ hiện tại lên Cloud...');
-          return await pushTokenToCloudSync(cleanUrl, state.token, isManual);
-        }
-        throw new Error('Trên Cloud hiện chưa có Token sống. Hãy mở tracuunoibo.ghn.vn để tự động bắt và đẩy Token mới lên Cloud.');
-      }
-    } catch (err) {
-      if (els.syncStatusDetail) {
-        els.syncStatusDetail.textContent = `Chưa tải được: ${err.message}`;
-        els.syncStatusDetail.style.color = '#dc2626';
-      }
-      if (isManual) showToast(`Lỗi đồng bộ Cloud: ${err.message}`, 'error', 5000);
-      addLog(`Lưu ý đồng bộ Cloud: ${err.message}`, true);
-      return false;
-    }
-  }
-
-  async function pushTokenToCloudSync(syncUrl, tokenToPush, isManual = false) {
-    const cleanUrl = (syncUrl || DEFAULT_SYNC_URL || '').trim();
-    const tok = (tokenToPush || els.tokenInput.value || state.token || '').trim().replace(/^["']+|["']+$/g, '');
-
-    if (!cleanUrl) {
-      if (isManual) showToast('Vui lòng nhập URL Google Apps Script trước!', 'error');
-      return false;
-    }
-    if (!tok || tok.length < 10) {
-      if (isManual) showToast('Ô nhập Token đang trống hoặc không hợp lệ!', 'error');
-      return false;
-    }
-
-    // CRITICAL GUARD: Never push an expired or invalid token onto Cloud!
-    if (tok === FIXED_DEFAULT_TOKEN) {
-      const msg = 'Token trong ô đang là Token mặc định đã hết hạn! Vui lòng lấy Token mới từ tracuunoibo.ghn.vn trước khi đẩy lên Cloud.';
-      if (els.syncStatusDetail) {
-        els.syncStatusDetail.textContent = `⚠️ ${msg}`;
-        els.syncStatusDetail.style.color = '#dc2626';
-      }
-      if (isManual) showToast(msg, 'error', 5500);
-      addLog(`Từ chối đẩy Token mặc định hết hạn (${tok.slice(0, 8)}...) lên Cloud.`, true);
-      return false;
-    }
-
-    // Verify with GHN API first if not yet verified
-    if (!(state.isTokenValid && state.token === tok)) {
-      if (els.syncStatusDetail) {
-        els.syncStatusDetail.textContent = 'Trạng thái: Đang kiểm tra tính hợp lệ của Token trước khi đẩy lên Cloud...';
-        els.syncStatusDetail.style.color = '#0284c7';
-      }
-      const isOk = await checkTokenValidity(tok, false);
-      if (!isOk) {
-        const msg = 'Token này đã hết hạn hoặc không hợp lệ! Hệ thống chặn không đẩy Token lỗi lên Cloud.';
-        if (els.syncStatusDetail) {
-          els.syncStatusDetail.textContent = `⚠️ ${msg}`;
-          els.syncStatusDetail.style.color = '#dc2626';
-        }
-        if (isManual) showToast(msg, 'error', 5500);
-        return false;
-      }
-    }
-
-    if (isManual) showToast('Đang đẩy Token hợp lệ lên Cloud...', 'info');
-    if (els.syncStatusDetail) {
-      els.syncStatusDetail.textContent = 'Trạng thái: Đang đẩy Token lên Cloud...';
-      els.syncStatusDetail.style.color = '#0284c7';
-    }
-
-    try {
-      // Use GET ?token=... first (100% immune to CORS & POST redirect body loss on Google Apps Script)
-      const sep = cleanUrl.includes('?') ? '&' : '?';
-      const getRes = await fetch(`${cleanUrl}${sep}token=${encodeURIComponent(tok)}&_t=${Date.now()}`, {
-        method: 'GET',
-        redirect: 'follow'
-      });
-
-      let success = false;
-      if (getRes.ok) {
-        try {
-          const data = await getRes.json();
-          if (data && (data.code === 200 || data.message === 'Updated' || data.token === tok)) {
-            success = true;
-          }
-        } catch (_) {
-          success = true;
-        }
-      }
-
-      // Fallback via POST text/plain if GET didn't update
-      if (!success) {
-        const res = await fetch(cleanUrl, {
-          method: 'POST',
-          redirect: 'follow',
-          headers: {
-            'Content-Type': 'text/plain;charset=utf-8'
-          },
-          body: JSON.stringify({ token: tok })
+        const res = await gasCall('proxy', {
+          method: (options.method || 'GET').toUpperCase(),
+          path: u.pathname,
+          query,
+          body
         });
-        if (res.ok) success = true;
+        return {
+          ok: res.status >= 200 && res.status < 300,
+          status: res.status,
+          json: async () => res.data
+        };
+      } catch (e) {
+        // Dự phòng: gọi trực tiếp nếu proxy lỗi
       }
-
-      if (success) {
-        localStorage.setItem('ghn_last_pushed_cloud_token', tok);
-        const nowStr = new Date().toLocaleString('vi-VN');
-        if (els.syncStatusDetail) {
-          els.syncStatusDetail.textContent = `✓ Đã đẩy Token sống lên Cloud thành công (${nowStr})`;
-          els.syncStatusDetail.style.color = '#059669';
-        }
-        if (els.cloudSyncInfoPill) {
-          els.cloudSyncInfoPill.style.display = 'inline-flex';
-          els.cloudSyncInfoText.textContent = `Đã đồng bộ Cloud (${nowStr})`;
-        }
-        addLog(`✓ Đã đẩy Token sống (${tok.slice(0, 8)}...) lên Cloud thành công.`);
-        if (isManual) showToast('Đã đẩy Token sống lên Cloud thành công! Đội ngũ có thể sử dụng ngay.', 'success');
-        return true;
-      } else {
-        throw new Error('Không nhận được phản hồi thành công từ Google Script.');
-      }
-    } catch (err) {
-      if (els.syncStatusDetail) {
-        els.syncStatusDetail.textContent = `Lỗi đẩy Token: ${err.message}`;
-        els.syncStatusDetail.style.color = '#dc2626';
-      }
-      if (isManual) showToast(`Lỗi đẩy Token lên Cloud: ${err.message}`, 'error');
-      addLog(`Lỗi đẩy Token lên Cloud: ${err.message}`, true);
-      return false;
     }
+    const headers = Object.assign({
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    }, options.headers || {});
+    if (state.token) headers['token'] = state.token;
+    return await fetch(url, Object.assign({}, options, { headers }));
   }
 
-  async function checkTokenValidity(tokenToTest, showUserToast = true) {
-    const cleanTok = (tokenToTest || '').trim();
-    if (!cleanTok) {
-      state.isTokenValid = false;
-      if (showUserToast) showToast('Vui lòng nhập Token trước!', 'error');
-      setTokenStatus('error', 'Chưa nhập Token');
-      return false;
+  function setConnectionStatus(status, text) {
+    if (els.hubConnectionPill) {
+      els.hubConnectionPill.className = `hub-pill status-${status}`;
     }
-
-    state.token = cleanTok;
-    setTokenStatus('loading', 'Đang kiểm tra token...');
-
-    try {
-      const res = await fetch(API_USER_INFO, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'token': state.token
-        }
-      });
-
-      const data = await res.json();
-      if (data && data.code === 200 && data.data) {
-        state.isTokenValid = true;
-        state.user = data.data;
-        localStorage.setItem('ghn_revert_token', state.token);
-
-        const fullName = data.data.full_name || data.data.name || 'Nhân viên GHN';
-        const empId = data.data.employee_id || data.data.user_id || data.data.id || '';
-
-        setTokenStatus('connected', `Đã kết nối: ${fullName}`);
-        els.userFullName.textContent = fullName;
-        els.userIdCode.textContent = empId ? `Mã NV: ${empId}` : '';
-        els.userAvatarText.textContent = fullName.trim().charAt(0).toUpperCase();
-        els.userInfoBadge.style.display = 'flex';
-
-        if (showUserToast) showToast(`Chào mừng ${fullName}! Kết nối Token thành công.`, 'success');
-        addLog(`✓ Xác thực Token thành công: ${fullName} (Mã: ${empId})`);
-
-        // Auto-push valid token to Cloud Sync if configured
-        const syncUrl = getConfiguredSyncUrl();
-        if (syncUrl && state.token !== localStorage.getItem('ghn_last_pushed_cloud_token')) {
-          pushTokenToCloudSync(syncUrl, state.token, false);
-        }
-
-        // If user had already selected a ward before connecting token, refresh ward warehouse lookup!
-        if (state.selectedWardAddress && state.selectedType !== 1) {
-          fetchWardWarehouses(state.selectedWardAddress, state.selectedType);
-        }
-
-        if (state.warehouses.length === 0) {
-          fetchWarehousesFromApi();
-        }
-        return true;
-      } else {
-        state.isTokenValid = false;
-        const shortToken = state.token.slice(0, 8) + '...';
-        setTokenStatus('error', `Token hết hạn (${shortToken}) - Cần lấy lại`);
-        els.userInfoBadge.style.display = 'none';
-        const msg = data.code_message_value || data.message || 'Token không hợp lệ hoặc đã hết hạn';
-        if (showUserToast) {
-          showToast(`${msg}. Hãy mở tracuunoibo.ghn.vn hoặc bấm "Hướng dẫn lấy Token".`, 'error', 5000);
-        }
-        addLog(`Token (${shortToken}) đã hết hạn hoặc không hợp lệ: ${msg}. Hãy mở trang tracuunoibo.ghn.vn để cập nhật Token mới.`, true);
-        return false;
-      }
-    } catch (err) {
-      state.isTokenValid = false;
-      const shortToken = state.token.slice(0, 8) + '...';
-      setTokenStatus('error', `Lỗi kiểm tra (${shortToken})`);
-      els.userInfoBadge.style.display = 'none';
-      if (showUserToast) showToast(`Lỗi kết nối kiểm tra Token: ${err.message}`, 'error');
-      addLog(`Lỗi kiểm tra token: ${err.message}`, true);
-      return false;
+    if (els.hubConnectionText) {
+      els.hubConnectionText.textContent = text;
+    }
+    if (els.tokenPill) {
+      els.tokenPill.className = 'token-status-pill';
+      if (status === 'ready') els.tokenPill.classList.add('connected');
+      else if (status === 'locked' || status === 'disconnected') els.tokenPill.classList.add('error');
+    }
+    if (els.tokenStatusText) {
+      els.tokenStatusText.textContent = text;
     }
   }
 
   function setTokenStatus(status, text) {
-    els.tokenPill.className = 'token-status-pill';
-    if (status === 'connected') els.tokenPill.classList.add('connected');
-    else if (status === 'error') els.tokenPill.classList.add('error');
-    els.tokenStatusText.textContent = text;
+    let s = 'disconnected';
+    if (status === 'connected') s = 'ready';
+    else if (status === 'loading') s = 'loading';
+    else if (status === 'locked') s = 'locked';
+    setConnectionStatus(s, text);
+  }
+
+  function applyGatewayStatus(st) {
+    state.authUser = st.user || state.authUser;
+    state.gateway = {
+      share: !!st.share,
+      tokenAlive: !!st.tokenAlive,
+      tokenOwner: st.tokenOwner || '',
+      tokenUpdatedAt: st.tokenUpdatedAt || '',
+      canUse: !!st.canUse,
+      reason: st.reason || ''
+    };
+    const wasConnected = state.isTokenValid;
+    state.isTokenValid = !!st.canUse;
+
+    // User badge
+    if (state.authUser) {
+      const name = state.authUser.name || state.authUser.username;
+      if (els.userFullName) els.userFullName.textContent = name;
+      if (els.userIdCode) {
+        els.userIdCode.textContent = state.authUser.role === 'admin'
+          ? `Quản lý • ${state.authUser.username}`
+          : `Tài khoản: ${state.authUser.username}`;
+      }
+      if (els.userAvatarText) els.userAvatarText.textContent = name.trim().charAt(0).toUpperCase();
+      if (els.loggedUserWrap) els.loggedUserWrap.style.display = 'flex';
+      if (els.btnOpenAdmin) els.btnOpenAdmin.style.display = state.authUser.role === 'admin' ? 'inline-flex' : 'none';
+    }
+
+    // Connection status & warning banner
+    if (st.canUse) {
+      setConnectionStatus('ready', 'Đã kết nối Token GHN (Sẵn sàng)');
+      if (els.gatewayBanner) els.gatewayBanner.style.display = 'none';
+      if (els.hubShareBadge) els.hubShareBadge.style.display = 'none';
+    } else {
+      const isLocked = st.share === false && st.tokenAlive;
+      const statusType = isLocked ? 'locked' : 'disconnected';
+      const statusText = isLocked ? 'Quản lý đang TẮT chia sẻ Token' : (st.reason || 'Chưa kết nối Token');
+      setConnectionStatus(statusType, statusText);
+      if (els.gatewayBannerText) {
+        els.gatewayBannerText.textContent = st.reason || (isLocked
+          ? 'Quản lý hiện đang TẮT chia sẻ Token. Bạn tạm thời không thể gửi yêu cầu cập nhật kho.'
+          : 'Hệ thống chưa kết nối Token GHN của Quản lý.');
+      }
+      if (els.gatewayBanner) els.gatewayBanner.style.display = 'flex';
+      if (els.hubShareBadge) els.hubShareBadge.style.display = isLocked ? 'inline-flex' : 'none';
+    }
+
+    if (st.canUse && !wasConnected) {
+      addLog('✓ Đã kết nối Token qua máy chủ trung gian.');
+      if (state.selectedWardAddress && state.selectedType !== 1) {
+        fetchWardWarehouses(state.selectedWardAddress, state.selectedType);
+      }
+      if (state.warehouses.length === 0) fetchWarehousesFromApi();
+    } else if (!st.canUse && wasConnected) {
+      addLog(`⚠️ Mất kết nối Token: ${st.reason}`, true);
+    }
+
+    renderAdminPanel();
+  }
+
+  async function refreshGatewayStatus(showToastOnError = false) {
+    if (!state.session) return false;
+    try {
+      const st = await gasCall('status');
+      applyGatewayStatus(st);
+      return st.canUse;
+    } catch (err) {
+      if (err.code !== 401) {
+        setConnectionStatus('disconnected', 'Lỗi kết nối máy chủ');
+        if (els.gatewayBannerText) els.gatewayBannerText.textContent = err.message;
+        if (els.gatewayBanner) els.gatewayBanner.style.display = 'flex';
+        state.isTokenValid = false;
+        if (showToastOnError) showToast(err.message, 'error');
+      }
+      return false;
+    }
+  }
+
+  // --- LOGIN SCREEN ---
+  function showLoginScreen(message = '') {
+    els.loginOverlay.classList.add('show');
+    document.body.classList.add('auth-locked');
+    els.loginError.textContent = message;
+    els.loginError.style.display = message ? 'block' : 'none';
+    setTimeout(() => els.loginUsername.focus(), 50);
+  }
+
+  function hideLoginScreen() {
+    els.loginOverlay.classList.remove('show');
+    document.body.classList.remove('auth-locked');
+  }
+
+  function handleSessionExpired(message) {
+    stopStatusPolling();
+    state.session = '';
+    state.authUser = null;
+    state.isTokenValid = false;
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    if (els.loggedUserWrap) els.loggedUserWrap.style.display = 'none';
+    if (els.btnOpenAdmin) els.btnOpenAdmin.style.display = 'none';
+    setConnectionStatus('disconnected', 'Chưa đăng nhập');
+    showLoginScreen(message || 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+  }
+
+  async function onLoginSuccess(st) {
+    state.session = st.session;
+    localStorage.setItem(SESSION_STORAGE_KEY, st.session);
+    hideLoginScreen();
+    els.loginPassword.value = '';
+    applyGatewayStatus(st);
+    showToast(`Xin chào ${st.user.name || st.user.username}!`, 'success');
+    addLog(`Đăng nhập thành công: ${st.user.name || st.user.username} (${st.user.username})`);
+    startStatusPolling();
+  }
+
+  async function handleLoginSubmit(e) {
+    if (e) e.preventDefault();
+    const username = els.loginUsername.value.trim();
+    const password = els.loginPassword.value;
+    if (!username || !password) {
+      els.loginError.textContent = 'Vui lòng nhập tài khoản và mật khẩu.';
+      els.loginError.style.display = 'block';
+      return;
+    }
+    els.btnLoginSubmit.disabled = true;
+    els.btnLoginSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang đăng nhập...';
+    els.loginError.style.display = 'none';
+    try {
+      const st = await gasCall('login', { username, password });
+      await onLoginSuccess(st);
+    } catch (err) {
+      els.loginError.textContent = err.message;
+      els.loginError.style.display = 'block';
+    } finally {
+      els.btnLoginSubmit.disabled = false;
+      els.btnLoginSubmit.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Đăng nhập';
+    }
+  }
+
+  function initGoogleSignIn() {
+    if (!GOOGLE_CLIENT_ID) return;
+    els.googleLoginWrap.style.display = 'block';
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = () => {
+      try {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: async (resp) => {
+            els.loginError.style.display = 'none';
+            try {
+              const st = await gasCall('loginGoogle', { credential: resp.credential });
+              await onLoginSuccess(st);
+            } catch (err) {
+              els.loginError.textContent = err.message;
+              els.loginError.style.display = 'block';
+            }
+          }
+        });
+        window.google.accounts.id.renderButton(els.googleLoginBtn, {
+          theme: 'outline', size: 'large', text: 'signin_with', locale: 'vi', width: 300
+        });
+      } catch (_) {}
+    };
+    document.head.appendChild(script);
+  }
+
+  async function handleLogout() {
+    if (!confirm('Bạn có chắc muốn đăng xuất?')) return;
+    try { await gasCall('logout'); } catch (_) {}
+    stopStatusPolling();
+    state.session = '';
+    state.authUser = null;
+    state.isTokenValid = false;
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    if (els.loggedUserWrap) els.loggedUserWrap.style.display = 'none';
+    if (els.btnOpenAdmin) els.btnOpenAdmin.style.display = 'none';
+    setConnectionStatus('disconnected', 'Chưa đăng nhập');
+    showLoginScreen('');
+  }
+
+  let statusTimer = null;
+  function startStatusPolling() {
+    stopStatusPolling();
+    statusTimer = setInterval(() => {
+      if (!state.isProcessing) refreshGatewayStatus(false);
+    }, 60000);
+  }
+  function stopStatusPolling() {
+    if (statusTimer) clearInterval(statusTimer);
+    statusTimer = null;
+  }
+
+  async function initAuth() {
+    // Dọn dẹp Token cũ còn lưu trong trình duyệt từ các phiên bản trước
+    ['ghn_revert_token', 'ghn_bridged_token', 'ghn_last_pushed_cloud_token', 'ghn_extracted_token', 'ghn_sync_url'].forEach(k => {
+      try { localStorage.removeItem(k); } catch (_) {}
+    });
+    try {
+      if (new URLSearchParams(window.location.search).has('token')) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    } catch (_) {}
+
+    initGoogleSignIn();
+    setConnectionStatus('loading', 'Đang kiểm tra đăng nhập...');
+
+    const saved = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!saved) {
+      setConnectionStatus('disconnected', 'Chưa đăng nhập');
+      showLoginScreen('');
+      return;
+    }
+    state.session = saved;
+    try {
+      const st = await gasCall('status');
+      hideLoginScreen();
+      applyGatewayStatus(st);
+      startStatusPolling();
+    } catch (err) {
+      if (err.code !== 401) {
+        // Lỗi mạng: vẫn giữ phiên, cho phép thử lại
+        showLoginScreen(err.message);
+      }
+    }
+  }
+
+  // --- ADMIN PANEL (CHỈ QUẢN LÝ) ---
+  function renderAdminPanel() {
+    if (!els.modalAdmin || !state.authUser || state.authUser.role !== 'admin') return;
+    const g = state.gateway || {};
+    els.adminShareToggle.checked = !!g.share;
+    els.adminShareLabel.textContent = g.share ? 'ĐANG BẬT - nhân viên đã đăng nhập có thể sử dụng' : 'ĐANG TẮT - không ai ngoài Quản lý sử dụng được';
+    els.adminShareLabel.style.color = g.share ? '#047857' : '#b91c1c';
+    const timeStr = g.tokenUpdatedAt ? new Date(g.tokenUpdatedAt).toLocaleString('vi-VN') : '---';
+    els.adminTokenInfo.innerHTML = g.tokenAlive
+      ? `<strong style="color:#047857;">✓ Token đang hoạt động</strong> • Chủ Token: <strong>${escapeHtml(g.tokenOwner || '---')}</strong> • Cập nhật lúc ${timeStr}`
+      : `<strong style="color:#b91c1c;">✗ Token chưa có hoặc đã hết hạn</strong> • Lần cập nhật: ${timeStr}. Hãy mở tracuunoibo.ghn.vn (đã cài Tampermonkey) hoặc dán Token mới bên dưới.`;
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  async function handleAdminShareToggle() {
+    const enabled = els.adminShareToggle.checked;
+    els.adminShareToggle.disabled = true;
+    try {
+      await gasCall('adminSetShare', { enabled });
+      showToast(enabled ? 'Đã BẬT chia sẻ Token cho nhân viên.' : 'Đã TẮT chia sẻ Token. Nhân viên không thể thao tác.', enabled ? 'success' : 'warning');
+      await refreshGatewayStatus(true);
+    } catch (err) {
+      els.adminShareToggle.checked = !enabled;
+      showToast(err.message, 'error');
+    } finally {
+      els.adminShareToggle.disabled = false;
+    }
+  }
+
+  async function handleAdminPushToken() {
+    const tok = els.adminTokenInput.value.trim();
+    if (!tok) {
+      showToast('Vui lòng dán Token mới vào ô.', 'error');
+      return;
+    }
+    els.btnAdminPushToken.disabled = true;
+    try {
+      await gasCall('adminPushToken', { token: tok });
+      els.adminTokenInput.value = '';
+      showToast('Đã cập nhật Token mới lên máy chủ!', 'success');
+      await refreshGatewayStatus(true);
+    } catch (err) {
+      showToast(err.message, 'error', 6000);
+    } finally {
+      els.btnAdminPushToken.disabled = false;
+    }
   }
 
   // ==========================================================================
@@ -911,8 +902,8 @@ function doPost(e) {
     els.inputOldProvince.placeholder = 'Đang tải danh sách Tỉnh/TP...';
     try {
       const [resP, resD] = await Promise.all([
-        fetch(API_PROVINCES_OLD, { method: 'GET', headers: getMasterHeaders() }),
-        fetch(API_DISTRICTS_OLD, { method: 'GET', headers: getMasterHeaders() })
+        ghnApiFetch(API_PROVINCES_OLD, { method: 'GET' }),
+        ghnApiFetch(API_DISTRICTS_OLD, { method: 'GET' })
       ]);
 
       const dataP = await resP.json();
@@ -949,9 +940,8 @@ function doPost(e) {
     state.wardModal.wardsOld = [];
 
     try {
-      const res = await fetch(`${API_WARDS_OLD}?district_id=${encodeURIComponent(districtId)}`, {
-        method: 'GET',
-        headers: getMasterHeaders()
+      const res = await ghnApiFetch(`${API_WARDS_OLD}?district_id=${encodeURIComponent(districtId)}`, {
+        method: 'GET'
       });
       const data = await res.json();
       if (data && data.code === 200 && Array.isArray(data.data)) {
@@ -971,9 +961,8 @@ function doPost(e) {
   async function loadNewProvincesV3() {
     els.inputNewProvince.placeholder = 'Đang tải Tỉnh/TP mới...';
     try {
-      const res = await fetch(API_PROVINCES_NEW, {
+      const res = await ghnApiFetch(API_PROVINCES_NEW, {
         method: 'POST',
-        headers: getMasterHeaders(),
         body: JSON.stringify({ offset: 0, limit: 200 })
       });
       const data = await res.json();
@@ -1002,9 +991,8 @@ function doPost(e) {
       const limit = 200;
 
       while (true) {
-        const res = await fetch(API_WARDS_NEW, {
+        const res = await ghnApiFetch(API_WARDS_NEW, {
           method: 'POST',
-          headers: getMasterHeaders(),
           body: JSON.stringify({ province_id: provinceId, offset, limit })
         });
         const data = await res.json();
@@ -1127,9 +1115,8 @@ function doPost(e) {
       : `ward_code=${encodeURIComponent(wardAddr.ward_code)}`;
 
     try {
-      const res = await fetch(`${API_WAREHOUSES_BY_WARD}?${queryStr}`, {
-        method: 'GET',
-        headers: getMasterHeaders()
+      const res = await ghnApiFetch(`${API_WAREHOUSES_BY_WARD}?${queryStr}`, {
+        method: 'GET'
       });
 
       const data = await res.json();
@@ -1288,8 +1275,8 @@ function doPost(e) {
   async function fetchWarehousesFromApi() {
     els.whTotalCount.textContent = 'Đang tải danh mục kho từ GHN...';
     try {
-      const res = await fetch(`${API_WAREHOUSES}?offset=0&limit=1000`, {
-        headers: { 'Accept': 'application/json' }
+      const res = await ghnApiFetch(`${API_WAREHOUSES}?offset=0&limit=1000`, {
+        method: 'GET'
       });
       const data = await res.json();
       if (data && data.code === 200 && data.data && data.data.warehouses) {
@@ -1300,8 +1287,8 @@ function doPost(e) {
         }));
 
         if (data.data.total > 1000) {
-          const res2 = await fetch(`${API_WAREHOUSES}?offset=1000&limit=1000`, {
-            headers: { 'Accept': 'application/json' }
+          const res2 = await ghnApiFetch(`${API_WAREHOUSES}?offset=1000&limit=1000`, {
+            method: 'GET'
           });
           const data2 = await res2.json();
           if (data2 && data2.code === 200 && data2.data && data2.data.warehouses) {
@@ -1550,9 +1537,15 @@ function doPost(e) {
 
   // --- VALIDATION BEFORE EXECUTION ---
   function validateForm() {
-    if (!state.token) {
-      showToast('Vui lòng nhập và kết nối Token GHN trước khi thao tác!', 'error');
-      els.tokenInput.focus();
+    if (!state.session) {
+      showToast('Vui lòng đăng nhập trước khi thao tác!', 'error');
+      showLoginScreen('Vui lòng đăng nhập để tiếp tục.');
+      return false;
+    }
+
+    if (!state.isTokenValid) {
+      const msg = (state.gateway && state.gateway.reason) || 'Hệ thống chưa kết nối được Token GHN của Quản lý hoặc Quản lý đang TẮT chia sẻ.';
+      showToast(msg, 'error', 4500);
       return false;
     }
 
@@ -1653,90 +1646,86 @@ function doPost(e) {
 
       const chunk = chunks[bIndex];
       els.progressStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang xử lý nhóm ${bIndex + 1}/${chunks.length} (${chunk.length} đơn)...`;
+      const nowStr = new Date().toLocaleTimeString('vi-VN');
 
       try {
-        const payload = {
+        const res = await gasCall('updateOrders', {
           order_codes: chunk,
           warehouse_id: whId,
+          warehouse_name: state.selectedWarehouse.name,
           type: whType,
           reason: reasonText
-        };
-
-        const res = await fetch(API_UPDATE_ORDERS, {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'token': state.token
-          },
-          body: JSON.stringify(payload)
         });
 
-        const data = await res.json();
-        const nowStr = new Date().toLocaleTimeString('vi-VN');
+        const oldWarehouses = res.old_warehouses || {};
+        const ghnData = (res.data && res.data.data) ? res.data.data : (res.data || {});
 
-        if (data && data.code === 200 && data.data) {
-          const resData = data.data;
-
-          if (Array.isArray(resData.success_order_codes)) {
-            resData.success_order_codes.forEach(code => {
-              state.results.success.push({
-                code: code,
-                type: WAREHOUSE_TYPE_NAMES[whType],
-                whName: state.selectedWarehouse.name,
-                whId: whId,
-                reason: reasonText,
-                time: nowStr
-              });
-            });
-          }
-
-          if (Array.isArray(resData.wait_for_approve_order_codes)) {
-            resData.wait_for_approve_order_codes.forEach(code => {
-              state.results.eform.push({
-                code: code,
-                type: WAREHOUSE_TYPE_NAMES[whType],
-                whName: state.selectedWarehouse.name,
-                whId: whId,
-                status: 'Chờ duyệt Eform',
-                reason: reasonText,
-                time: nowStr
-              });
-            });
-          }
-
-          if (Array.isArray(resData.fail_order_codes)) {
-            resData.fail_order_codes.forEach(item => {
-              state.results.failed.push({
-                code: item.order_code,
-                error: item.err_msg || 'Cập nhật kho thất bại',
-                time: nowStr
-              });
-            });
-          }
-
-          addLog(`Nhóm ${bIndex + 1}: Thành công ${resData.success_order_codes?.length || 0}, Chờ Eform ${resData.wait_for_approve_order_codes?.length || 0}, Lỗi ${resData.fail_order_codes?.length || 0}`);
-        } else {
-          const errMsg = data.code_message_value || data.message || 'Lỗi gọi API GHN';
-          chunk.forEach(code => {
-            state.results.failed.push({
+        if (Array.isArray(ghnData.success_order_codes)) {
+          ghnData.success_order_codes.forEach(code => {
+            const oldLabel = oldWarehouses[code] || 'Chưa rõ kho cũ';
+            const changeFromTo = `${oldLabel} ➔ ${state.selectedWarehouse.name} (${whId})`;
+            state.results.success.push({
               code: code,
-              error: errMsg,
+              type: WAREHOUSE_TYPE_NAMES[whType],
+              whName: state.selectedWarehouse.name,
+              whId: whId,
+              oldWhName: oldLabel,
+              changeFromTo: changeFromTo,
+              reason: reasonText,
               time: nowStr
             });
           });
-          addLog(`Nhóm ${bIndex + 1} lỗi: ${errMsg}`, true);
         }
+
+        if (Array.isArray(ghnData.wait_for_approve_order_codes)) {
+          ghnData.wait_for_approve_order_codes.forEach(code => {
+            const oldLabel = oldWarehouses[code] || 'Chưa rõ kho cũ';
+            const changeFromTo = `${oldLabel} ➔ ${state.selectedWarehouse.name} (${whId})`;
+            state.results.eform.push({
+              code: code,
+              type: WAREHOUSE_TYPE_NAMES[whType],
+              whName: state.selectedWarehouse.name,
+              whId: whId,
+              oldWhName: oldLabel,
+              changeFromTo: changeFromTo,
+              status: ghnData.eform_code ? `Chờ duyệt Eform (${ghnData.eform_code})` : 'Chờ duyệt Eform',
+              reason: reasonText,
+              time: nowStr
+            });
+          });
+        }
+
+        if (Array.isArray(ghnData.fail_order_codes)) {
+          ghnData.fail_order_codes.forEach(item => {
+            state.results.failed.push({
+              code: item.order_code,
+              error: item.err_msg || 'Cập nhật kho thất bại',
+              time: nowStr
+            });
+          });
+        }
+
+        const successCount = ghnData.success_order_codes?.length || 0;
+        const eformCount = ghnData.wait_for_approve_order_codes?.length || 0;
+        const failCount = ghnData.fail_order_codes?.length || 0;
+
+        addLog(`Nhóm ${bIndex + 1}: Thành công ${successCount}, Chờ Eform ${eformCount}, Lỗi ${failCount} (Đã tự động lưu Google Sheet)`);
+
       } catch (err) {
-        const nowStr = new Date().toLocaleTimeString('vi-VN');
         chunk.forEach(code => {
           state.results.failed.push({
             code: code,
-            error: err.message || 'Lỗi kết nối mạng',
+            error: err.message || 'Lỗi gửi yêu cầu cập nhật',
             time: nowStr
           });
         });
-        addLog(`Lỗi mạng tại nhóm ${bIndex + 1}: ${err.message}`, true);
+        addLog(`Nhóm ${bIndex + 1} lỗi: ${err.message}`, true);
+        if (err.code === 403) {
+          showToast(err.message, 'error', 6000);
+          state.shouldStop = true;
+          await refreshGatewayStatus(false);
+          break;
+        }
       }
 
       processedCount += chunk.length;
@@ -1747,7 +1736,7 @@ function doPost(e) {
       renderResultsTables();
 
       if (bIndex < chunks.length - 1 && !state.shouldStop) {
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 300));
       }
     }
 
@@ -1758,7 +1747,7 @@ function doPost(e) {
     els.btnExportExcel.style.display = 'inline-flex';
     els.progressStatusText.innerHTML = `<i class="fa-solid fa-circle-check" style="color: var(--success);"></i> Đã hoàn thành quá trình cập nhật!`;
 
-    const summaryMsg = `Hoàn tất! Thành công: ${state.results.success.length}, Chờ Eform: ${state.results.eform.length}, Thất bại: ${state.results.failed.length}`;
+    const summaryMsg = `Hoàn tất! Thành công: ${state.results.success.length}, Chờ Eform: ${state.results.eform.length}, Thất bại: ${state.results.failed.length}. Đã ghi đầy đủ vào Google Sheet!`;
     showToast(summaryMsg, state.results.failed.length === 0 ? 'success' : 'info', 5000);
     addLog(`=== ${summaryMsg} ===`);
   }
@@ -1775,10 +1764,10 @@ function doPost(e) {
       els.tbodySuccess.innerHTML = state.results.success.map((it, idx) => `
         <tr>
           <td>${idx + 1}</td>
-          <td><strong style="color: #0f172a; font-family: monospace;">${it.code}</strong></td>
-          <td><span class="tab-badge badge-success">${it.type}</span></td>
-          <td>${it.whName}</td>
-          <td style="color: var(--text-muted);">${it.time}</td>
+          <td><strong style="color: #0f172a; font-family: monospace;">${escapeHtml(it.code)}</strong></td>
+          <td><span class="tab-badge badge-success">${escapeHtml(it.type)}</span></td>
+          <td><strong>${escapeHtml(it.changeFromTo || it.whName)}</strong></td>
+          <td style="color: var(--text-muted);">${escapeHtml(it.time)}</td>
         </tr>
       `).join('');
     } else {
@@ -1792,10 +1781,10 @@ function doPost(e) {
       els.tbodyEform.innerHTML = state.results.eform.map((it, idx) => `
         <tr>
           <td>${idx + 1}</td>
-          <td><strong style="color: #0f172a; font-family: monospace;">${it.code}</strong></td>
-          <td><span class="tab-badge badge-warning">${it.status}</span></td>
-          <td>${it.whName}</td>
-          <td style="color: var(--text-muted);">${it.time}</td>
+          <td><strong style="color: #0f172a; font-family: monospace;">${escapeHtml(it.code)}</strong></td>
+          <td><span class="tab-badge badge-warning">${escapeHtml(it.status)}</span></td>
+          <td><strong>${escapeHtml(it.changeFromTo || it.whName)}</strong></td>
+          <td style="color: var(--text-muted);">${escapeHtml(it.time)}</td>
         </tr>
       `).join('');
     } else {
@@ -1809,9 +1798,9 @@ function doPost(e) {
       els.tbodyFailed.innerHTML = state.results.failed.map((it, idx) => `
         <tr>
           <td>${idx + 1}</td>
-          <td><strong style="color: #b91c1c; font-family: monospace;">${it.code}</strong></td>
-          <td style="color: #dc2626;">${it.error}</td>
-          <td style="color: var(--text-muted);">${it.time}</td>
+          <td><strong style="color: #b91c1c; font-family: monospace;">${escapeHtml(it.code)}</strong></td>
+          <td style="color: #dc2626;">${escapeHtml(it.error)}</td>
+          <td style="color: var(--text-muted);">${escapeHtml(it.time)}</td>
         </tr>
       `).join('');
     } else {
@@ -1833,9 +1822,11 @@ function doPost(e) {
       'STT',
       'Mã Đơn Hàng',
       'Trạng Thái',
+      'Đổi kho từ kho nào đến kho nào',
       'Loại Kho Cập Nhật',
       'Mã Kho Đích',
       'Tên Kho Đích',
+      'Kho Cũ (Ban đầu)',
       'Phường/Xã Đã Chọn',
       'Lý Do',
       'Thông Báo / Chi Tiết Lỗi',
@@ -1850,9 +1841,11 @@ function doPost(e) {
         stt++,
         item.code,
         'Thành công',
+        item.changeFromTo || `${item.oldWhName || 'Chưa rõ'} ➔ ${item.whName}`,
         item.type,
         item.whId,
         item.whName,
+        item.oldWhName || '',
         wardStr,
         item.reason,
         'Cập nhật kho hoàn tất',
@@ -1865,12 +1858,14 @@ function doPost(e) {
         stt++,
         item.code,
         'Chờ duyệt Eform',
+        item.changeFromTo || `${item.oldWhName || 'Chưa rõ'} ➔ ${item.whName}`,
         item.type,
         item.whId,
         item.whName,
+        item.oldWhName || '',
         wardStr,
         item.reason,
-        'Đã gửi yêu cầu Eform duyệt chuyển kho',
+        item.status,
         item.time
       ]);
     });
@@ -1880,11 +1875,13 @@ function doPost(e) {
         stt++,
         item.code,
         'Thất bại',
+        '---',
         WAREHOUSE_TYPE_NAMES[state.selectedType],
         state.selectedWarehouse ? state.selectedWarehouse.id : '',
         state.selectedWarehouse ? state.selectedWarehouse.name : '',
-        wardStr,
         '',
+        wardStr,
+        REASON_LABELS[els.reasonSelect.value] || els.reasonSelect.value,
         item.error,
         item.time
       ]);
@@ -2251,53 +2248,36 @@ function doPost(e) {
       els.modalGuide.classList.remove('show');
     });
 
-    // Cloud Sync Modal Listeners
-    if (els.btnOpenSyncModal) {
-      els.btnOpenSyncModal.addEventListener('click', () => {
-        const savedUrl = getConfiguredSyncUrl();
-        els.syncUrlInput.value = savedUrl;
-        els.modalSync.classList.add('show');
+    // 11. Auth & Admin Listeners
+    if (els.loginForm) {
+      els.loginForm.addEventListener('submit', handleLoginSubmit);
+    }
+    if (els.btnLogout) {
+      els.btnLogout.addEventListener('click', handleLogout);
+    }
+    if (els.btnRefreshStatus) {
+      els.btnRefreshStatus.addEventListener('click', () => {
+        showToast('Đang kiểm tra kết nối Token...', 'info', 2000);
+        refreshGatewayStatus(true);
       });
     }
-    if (els.btnCloseSync) {
-      els.btnCloseSync.addEventListener('click', () => els.modalSync.classList.remove('show'));
-    }
-    if (els.btnCancelSync) {
-      els.btnCancelSync.addEventListener('click', () => els.modalSync.classList.remove('show'));
-    }
-    if (els.btnSaveSyncUrl) {
-      els.btnSaveSyncUrl.addEventListener('click', async () => {
-        const url = els.syncUrlInput.value.trim();
-        if (url) {
-          localStorage.setItem('ghn_sync_url', url);
-          showToast('Đã lưu URL đồng bộ Cloud!', 'success');
-          await fetchTokenFromCloudSync(url, true);
-        } else {
-          localStorage.removeItem('ghn_sync_url');
-          showToast('Đã xóa URL đồng bộ Cloud.', 'info');
-          if (els.cloudSyncInfoPill) els.cloudSyncInfoPill.style.display = 'none';
-        }
-        els.modalSync.classList.remove('show');
+    if (els.btnOpenAdmin) {
+      els.btnOpenAdmin.addEventListener('click', () => {
+        renderAdminPanel();
+        els.modalAdmin.classList.add('show');
       });
     }
-    if (els.btnTestSyncUrl) {
-      els.btnTestSyncUrl.addEventListener('click', () => {
-        const url = els.syncUrlInput.value.trim();
-        if (url) localStorage.setItem('ghn_sync_url', url);
-        fetchTokenFromCloudSync(url, true);
-      });
+    if (els.btnCloseAdmin) {
+      els.btnCloseAdmin.addEventListener('click', () => els.modalAdmin.classList.remove('show'));
     }
-    if (els.btnPushSyncUrl) {
-      els.btnPushSyncUrl.addEventListener('click', () => {
-        const url = els.syncUrlInput.value.trim();
-        if (url) localStorage.setItem('ghn_sync_url', url);
-        pushTokenToCloudSync(url, els.tokenInput.value.trim(), true);
-      });
+    if (els.btnCloseAdminFooter) {
+      els.btnCloseAdminFooter.addEventListener('click', () => els.modalAdmin.classList.remove('show'));
     }
-    if (els.btnCopyGasCode) {
-      els.btnCopyGasCode.addEventListener('click', () => {
-        copyToClipboard(GAS_CODE_SNIPPET, 'Đã copy toàn bộ mã nguồn Google Apps Script v2!');
-      });
+    if (els.adminShareToggle) {
+      els.adminShareToggle.addEventListener('change', handleAdminShareToggle);
+    }
+    if (els.btnAdminPushToken) {
+      els.btnAdminPushToken.addEventListener('click', handleAdminPushToken);
     }
 
     // Close modals on background click
@@ -2307,9 +2287,9 @@ function doPost(e) {
     els.modalGuide.addEventListener('click', (e) => {
       if (e.target === els.modalGuide) els.modalGuide.classList.remove('show');
     });
-    if (els.modalSync) {
-      els.modalSync.addEventListener('click', (e) => {
-        if (e.target === els.modalSync) els.modalSync.classList.remove('show');
+    if (els.modalAdmin) {
+      els.modalAdmin.addEventListener('click', (e) => {
+        if (e.target === els.modalAdmin) els.modalAdmin.classList.remove('show');
       });
     }
     if (els.modalSelectWard) {
@@ -2324,9 +2304,9 @@ function doPost(e) {
     initEvents();
     updateWardSelectorAvailability();
     initWarehouses();
-    initToken();
+    initAuth();
     updateOrderCounter();
-    console.log('⚡ GHN Revert Hub v2.0 Initialized Successfully.');
+    console.log('⚡ GHN Revert Hub v4.0 Initialized Successfully.');
   }
 
   if (document.readyState === 'loading') {

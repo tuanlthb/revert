@@ -1,76 +1,65 @@
-# Hướng Dẫn Thiết Lập Tự Động Kết Nối & Đồng Bộ Token GHN (Bản Mới v3.0)
+# Hướng Dẫn Vận Hành Hệ Thống GHN Revert Hub (Phiên Bản v4.0)
 
-Hệ thống đã được nâng cấp lên **v3.0**, khắc phục triệt để các nguyên nhân khiến Token chưa tự động kết nối được trước đây:
+Hệ thống **v4.0** đã được nâng cấp toàn diện theo 4 yêu cầu quan trọng:
 
-1. **Sửa lỗi lọc độ dài Token UUID 36 ký tự**: Trên `tracuunoibo.ghn.vn`, Token phiên đăng nhập của nhân viên có định dạng UUID 36 ký tự (ví dụ: `ed19b5b2-74a1-42f5-bdd3-d3deecd16278`). Bản cũ kiểm tra `token.length < 50` nên đã bỏ qua không đồng bộ Token 36 ký tự này. Bản v3.0 đã mở khóa hoàn toàn cho cả Token UUID 36 ký tự và JWT.
-2. **Bổ sung Cầu nối trực tiếp Tampermonkey (Zero-Config)**: Khi bạn cài [`ghn_revert_kho.user.js`](file:///d:/Revert/ghn_revert_kho.user.js) vào Tampermonkey, script sẽ tự động bắt Token từ cả `localStorage` lẫn các gói tin mạng (`fetch`/`XHR`) trên `tracuunoibo.ghn.vn` và **bơm trực tiếp sang trang `index.html`** ngay trên trình duyệt của bạn mà không cần cấu hình gì thêm!
-3. **Sửa lỗi chặn CORS trên Google Apps Script**: Đổi phương thức gửi sang `text/plain;charset=utf-8` kết hợp fallback `GET ?token=...`, giúp đẩy và tải Token qua Google Apps Script thành công 100% không bao giờ bị trình duyệt chặn CORS.
+1. **Khắc phục triệt để lỗi Token trên máy nhân viên**:
+   - Token GHN của Quản lý được lưu an toàn trên máy chủ Google Apps Script.
+   - Mọi máy tính của nhân viên khi vào `https://tuanlthb.github.io/revert/` đều tự động sử dụng Token của Quản lý để thao tác đổi kho mà **không cần cài Tampermonkey** và **không cần biết chuỗi Token thô**.
+2. **Nút BẬT / TẮT Chia Sẻ Token (Quản trị tập trung)**:
+   - Có công tắc **BẬT / TẮT CHIA SẺ** ngay trên Widget Tampermonkey tại `tracuunoibo.ghn.vn` và trên màn hình Quản trị của web.
+   - Khi Quản lý **TẮT Chia Sẻ**: toàn bộ nhân viên sẽ lập tức bị khóa, không thể gửi lệnh đổi kho.
+3. **Bảo mật Đăng Nhập & Ghi Nhật Ký Google Sheet tự động**:
+   - Nhân viên phải đăng nhập tài khoản trước khi thao tác.
+   - Mọi lượt đổi kho đều tự động ghi lại vào Google Spreadsheet:
+     [Bảng Nhật Ký Đổi Kho Trực Tuyến](https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing)
+     gồm đầy đủ các cột: `Số thứ tự`, `Tài khoản`, `Họ tên`, `Mã đơn`, `Đổi kho từ kho nào đến kho nào`, `Thời gian`, `Loại kho cập nhật`, `Kho đích (mới)`, `Kho ban đầu (cũ)`, `Lý do đổi kho`, `Kết quả`, `Chi tiết / Mã Eform`, `Mã phiên`, `Thiết bị`.
+4. **Bảo mật giao diện**:
+   - Đã **loại bỏ và ẩn hoàn toàn** thanh nhập / hiển thị Token thô trên giao diện web.
+   - Chỉ hiển thị huy hiệu trạng thái: **"Đã kết nối Token GHN (Sẵn sàng)"** hoặc **"Quản lý đang TẮT chia sẻ"** / **"Chưa kết nối Token"**.
 
 ---
 
-## ⚡ Cách 1: Tự Động Kết Nối Ngay Trên Máy Của Bạn (Không Cần Cấu Hình Cloud)
+## 🚀 HƯỚNG DẪN CÀI ĐẶT & KÍCH HOẠT (CHỈ CẦN LÀM 1 LẦN)
 
-1. Mở tiện ích **Tampermonkey** trên trình duyệt của bạn.
-2. Cập nhật (copy & dán đè) toàn bộ nội dung file [`ghn_revert_kho.user.js`](file:///d:/Revert/ghn_revert_kho.user.js) (v3.0) và bấm **Lưu (Ctrl+S)**.
-3. Mở trang [https://tracuunoibo.ghn.vn/internal/revert](https://tracuunoibo.ghn.vn/internal/revert) (hoặc tải lại trang F5). Bạn sẽ thấy nút góc dưới bên phải chuyển sang màu xanh lá: **`⚡ Token Revert: Đã kết nối (...)`**.
-4. Mở trang [`index.html`](file:///d:/Revert/index.html) -> Trang web sẽ **tự động nhận ngay Token mới nhất** từ Tampermonkey và báo **`Đã kết nối: Lê Thanh Tuấn`**!
-   *(Lưu ý: Nếu mở file `file:///D:/Revert/index.html` trực tiếp từ ổ cứng, hãy bật "Allow access to file URLs / Cho phép truy cập vào các URL tệp" cho tiện ích Tampermonkey trong phần Quản lý tiện ích `chrome://extensions`).*
+### BƯỚC 1: Cập Nhật Mã Nguồn Google Apps Script
+1. Truy cập vào dự án Apps Script hiện tại của bạn:
+   [https://script.google.com](https://script.google.com)
+2. Mở file mã nguồn `Code.gs`.
+3. Xóa toàn bộ nội dung cũ trong `Code.gs` và copy toàn bộ nội dung từ file [`gas/Code.gs`](file:///d:/Revert/gas/Code.gs) dán vào.
+4. Bấm biểu tượng **Lưu (Ctrl + S)**.
+5. **Chạy hàm khởi tạo (rất quan trọng)**:
+   - Ở thanh công cụ bên trên, tại ô chọn hàm cần chạy, chọn hàm **`khoiTaoHeThong`** rồi bấm **Run (Chạy)**.
+   - Hệ thống sẽ yêu cầu cấp quyền truy cập Google Sheet lần đầu: bấm *Review Permissions (Xem lại quyền)* -> Chọn tài khoản Google của bạn -> *Advanced (Nâng cao)* -> *Go to ... (unsafe) / Tiếp tục* -> *Allow (Cho phép)*.
+   - Sau khi chạy xong, mở link Google Sheet của bạn sẽ thấy 3 tab đã được tự động tạo sẵn và định dạng chuẩn: `NhatKyDoiKho`, `TaiKhoan`, `NhatKyTruyCap`.
+6. **Triển khai phiên bản mới**:
+   - Bấm nút xanh **Triển khai (Deploy)** ở góc trên bên phải -> Chọn **Quản lý phiên bản triển khai (Manage deployments)**.
+   - Bấm biểu tượng **Cây bút (Chỉnh sửa / Edit)** tại phiên bản đang hoạt động.
+   - Tại ô **Phiên bản (Version)**, chọn **"Phiên bản mới" (New version)**.
+   - Bấm **Triển khai (Deploy)**.
+   *(Đường link `https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec` sẽ được cập nhật phiên bản mới nhất).*
 
 ---
 
-## ☁️ Cách 2: Đồng Bộ Lên Cloud Cho Nhân Viên / Người Khác Dùng Chung
+### BƯỚC 2: Cài Đặt Tampermonkey v4.0 Trên Máy Quản Lý
+1. Mở trình duyệt Chrome/Edge trên máy tính của bạn (máy có đăng nhập `tracuunoibo.ghn.vn`).
+2. Mở tiện ích **Tampermonkey** -> Bấm **Tạo script mới** (hoặc mở script GHN Revert cũ).
+3. Copy toàn bộ nội dung trong file [`ghn_revert_kho.user.js`](file:///d:/Revert/ghn_revert_kho.user.js) và dán đè vào, sau đó bấm **Ctrl + S** để lưu.
+4. Truy cập trang: [https://tracuunoibo.ghn.vn/internal/revert](https://tracuunoibo.ghn.vn/internal/revert)
+   - Ở góc dưới bên phải màn hình sẽ xuất hiện **Bảng điều khiển Quản trị Token v4.0**.
+   - Tiện ích sẽ **tự động bắt Token GHN** của bạn và tự động đẩy lên Google Apps Script.
+   - Bạn sẽ thấy công tắc lớn:
+     - 🟢 **`ĐANG BẬT CHIA SẺ (Bấm để Tắt)`** -> Mọi nhân viên trên web đều dùng được.
+     - 🔴 **`ĐANG TẮT CHIA SẺ (Bấm để Bật)`** -> Khóa toàn bộ nhân viên.
 
-Nếu bạn gửi trang web cho nhân viên ở máy tính khác sử dụng:
+---
 
-### Bước 1: Tạo Web App trên Google Apps Script (Miễn phí 100%)
-1. Truy cập: [https://script.google.com](https://script.google.com) > Nhấn **"Dự án mới" (New Project)**.
-2. Xóa mã mặc định và dán đoạn mã v2 (hỗ trợ cả GET và POST chống lỗi CORS) sau vào:
-
-```javascript
-function doGet(e) {
-  var props = PropertiesService.getScriptProperties();
-  if (e && e.parameter && e.parameter.token) {
-    var newTok = String(e.parameter.token).trim();
-    props.setProperty('GHN_TOKEN', newTok);
-    props.setProperty('UPDATED_AT', new Date().toISOString());
-    return ContentService.createTextOutput(JSON.stringify({ code: 200, message: 'Updated', token: newTok }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  var token = props.getProperty('GHN_TOKEN') || '';
-  var updatedAt = props.getProperty('UPDATED_AT') || '';
-  return ContentService.createTextOutput(JSON.stringify({ code: 200, token: token, updated_at: updatedAt }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function doPost(e) {
-  try {
-    var props = PropertiesService.getScriptProperties();
-    var raw = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
-    var data = JSON.parse(raw);
-    var tok = data.token || (e && e.parameter && e.parameter.token) || '';
-    if (tok) {
-      props.setProperty('GHN_TOKEN', String(tok).trim());
-      props.setProperty('UPDATED_AT', new Date().toISOString());
-      return ContentService.createTextOutput(JSON.stringify({ code: 200, message: 'Updated' }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    return ContentService.createTextOutput(JSON.stringify({ code: 400, message: 'Missing token' }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ code: 500, error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-```
-
-3. Nhấn **Ctrl + S** để lưu.
-4. Nhấn **Triển khai (Deploy)** > **Tùy chọn triển khai mới (New deployment)** > Chọn loại **Ứng dụng web (Web app)**:
-   - **Thực thi dưới dạng (Execute as)**: `Tôi (Me)`
-   - **Ai có quyền truy cập (Who has access)**: **`Bất kỳ ai (Anyone)`**
-5. Nhấn **Triển khai** và copy đường link `https://script.google.com/macros/s/.../exec`.
-
-### Bước 2: Dán Link vào Trang Web Revert
-1. Mở trang [`index.html`](file:///d:/Revert/index.html) > Bấm nút **"Tự động đồng bộ"** trên thanh Token.
-2. Dán đường link `https://script.google.com/macros/s/.../exec` vào ô URL.
-3. Bạn có thể bấm nút **"Đẩy Token lên Cloud"** để đẩy ngay Token hiện tại lên, sau đó bấm **"Lưu Cấu Hình"**.
-4. Bạn cũng có thể dán cố định link này vào biến `DEFAULT_SYNC_URL` ở dòng 44 trong file [`app.js`](file:///d:/Revert/app.js) để mọi nhân viên mở trang lên là tự động nhận Token!
+### BƯỚC 3: Nhân Viên Sử Dụng Trên Web Revert
+1. Nhân viên truy cập trang web: [https://tuanlthb.github.io/revert/](https://tuanlthb.github.io/revert/)
+2. Màn hình yêu cầu đăng nhập sẽ hiện ra:
+   - **Tài khoản**: Nhập tài khoản GHN hoặc Họ tên của nhân viên (ví dụ: `nguyenvana` hoặc `Nguyễn Văn A`).
+   - **Mật khẩu**: Nhập mật khẩu bất kỳ (ví dụ: `123456`).
+   *(Hệ thống đã bật chế độ tự động cấp quyền: nhân viên đăng nhập lần đầu với tên của mình sẽ được tự động thêm vào tab `TaiKhoan` trên Google Sheet. Bạn có thể khóa hoặc đổi mật khẩu nhân viên bất kỳ lúc nào trực tiếp trên Google Sheet).*
+3. Sau khi đăng nhập:
+   - Nếu bạn đang **BẬT chia sẻ**: Huy hiệu hiện xanh **`Đã kết nối Token GHN (Sẵn sàng)`**. Nhân viên chỉ việc dán danh sách mã đơn, chọn loại kho, chọn phường/xã hoặc chọn kho đích rồi bấm **Cập nhật kho**.
+   - Nếu bạn đang **TẮT chia sẻ**: Huy hiệu hiện đỏ **`Quản lý đang TẮT chia sẻ Token`** kèm thanh cảnh báo. Nút cập nhật sẽ bị khóa và nếu cố tình gửi lệnh hệ thống máy chủ sẽ chặn lại và báo lỗi ngay.
+4. Mọi thao tác đổi kho đều được ghi trực tiếp vào Google Sheet [NhatKyDoiKho](https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing) theo đúng định dạng bạn yêu cầu.

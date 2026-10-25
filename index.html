@@ -38,13 +38,16 @@
       </div>
 
       <div class="header-actions">
+        <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" class="btn btn-outline btn-sm" title="Mở bảng Google Sheet xem nhật ký đổi kho trực tuyến">
+          <i class="fa-solid fa-table"></i> Nhật Ký Google Sheet
+        </a>
+        <button type="button" id="btn-open-guide" class="btn btn-outline btn-sm" title="Hướng dẫn sử dụng và cài đặt">
+          <i class="fa-solid fa-circle-question"></i> Hướng Dẫn
+        </button>
         <div id="token-pill" class="token-status-pill">
           <span class="status-dot"></span>
-          <span id="token-status-text">Chưa kết nối Token</span>
+          <span id="token-status-text">Đang kết nối...</span>
         </div>
-        <button id="btn-open-guide" class="btn btn-secondary btn-sm">
-          <i class="fa-solid fa-circle-question"></i> Hướng dẫn lấy Token
-        </button>
       </div>
     </div>
   </header>
@@ -52,48 +55,47 @@
   <!-- Main Container -->
   <main class="container">
     
-    <!-- Token Management Panel -->
-    <section class="token-panel">
-      <div class="token-input-group">
-        <i class="fa-solid fa-key input-icon"></i>
-        <input 
-          type="password" 
-          id="token-input" 
-          class="token-input" 
-          value="ed19b5b2-74a1-42f5-bdd3-d3deecd16278"
-          placeholder="Nhập hoặc dán Token GHN của bạn (JWT Token)..." 
-          autocomplete="off"
-        />
-        <button type="button" id="btn-toggle-token" class="token-toggle-btn" title="Hiện/Ẩn token">
-          <i class="fa-solid fa-eye"></i>
-        </button>
-      </div>
-
-      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-        <button id="btn-save-token" class="btn btn-primary btn-sm">
-          <i class="fa-solid fa-floppy-disk"></i> Lưu & Kết Nối
-        </button>
-        <button id="btn-check-token" class="btn btn-secondary btn-sm" title="Kiểm tra thông tin tài khoản">
-          <i class="fa-solid fa-arrows-rotate"></i> Kiểm tra
-        </button>
-        <button id="btn-open-sync-modal" class="btn btn-outline btn-sm" title="Tự động đồng bộ Token từ máy chủ hoặc Google Apps Script">
-          <i class="fa-solid fa-cloud-arrow-down"></i> Tự động đồng bộ
-        </button>
-      </div>
-
-      <div id="user-info-badge" class="user-badge-info" style="display: none;">
-        <div class="user-avatar-circle" id="user-avatar-text">U</div>
-        <div>
-          <div id="user-fullname" style="font-weight: 700; font-size: 13px;">Nhân viên GHN</div>
-          <div id="user-id-code" style="font-size: 11px; color: var(--text-muted);">Mã: ---</div>
+    <!-- Hub Status & User Session Panel (Token thô đã được ẩn hoàn toàn) -->
+    <section class="hub-status-panel">
+      <div class="hub-status-left">
+        <div id="hub-connection-pill" class="hub-pill status-loading">
+          <span class="status-dot"></span>
+          <span id="hub-connection-text">Đang kiểm tra kết nối Token GHN...</span>
+        </div>
+        <div id="hub-share-badge" class="hub-share-badge" style="display: none;">
+          <i class="fa-solid fa-lock"></i> <span>Quản lý đang TẮT chia sẻ</span>
         </div>
       </div>
 
-      <div id="cloud-sync-info-pill" style="display: none; font-size: 12px; color: #0284c7; background: #f0f9ff; border: 1px solid #bae6fd; padding: 4px 10px; border-radius: 20px; align-items: center; gap: 6px;">
-        <i class="fa-solid fa-cloud-check"></i>
-        <span id="cloud-sync-info-text">Đã đồng bộ tự động từ Quản lý</span>
+      <div class="hub-status-right">
+        <!-- Thông tin nhân viên đang đăng nhập -->
+        <div id="logged-user-wrap" class="logged-user-wrap">
+          <div class="user-avatar-circle" id="user-avatar-text">U</div>
+          <div>
+            <div id="user-fullname" class="user-name">Đang tải...</div>
+            <div id="user-id-code" class="user-sub">Tài khoản</div>
+          </div>
+          <button type="button" id="btn-logout" class="btn btn-outline btn-sm" style="padding: 4px 8px; font-size: 11.5px;" title="Đăng xuất khỏi hệ thống">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i> Đăng xuất
+          </button>
+        </div>
+
+        <!-- Nút quản trị chia sẻ (chỉ hiện khi Quản lý đăng nhập) -->
+        <button type="button" id="btn-open-admin" class="btn btn-secondary btn-sm" style="display: none;" title="Quản lý chia sẻ Token cho đội ngũ">
+          <i class="fa-solid fa-shield-halved"></i> Quản lý Chia Sẻ
+        </button>
+
+        <button type="button" id="btn-refresh-status" class="btn btn-secondary btn-sm" title="Làm mới trạng thái kết nối">
+          <i class="fa-solid fa-arrows-rotate"></i> Làm mới
+        </button>
       </div>
     </section>
+
+    <!-- Gateway Warning Banner (hiện khi Quản lý tắt share hoặc mất kết nối Token) -->
+    <div id="gateway-banner" class="gateway-warning-banner" style="display: none;">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      <span id="gateway-banner-text">Quản lý hiện đang TẮT chia sẻ Token. Bạn tạm thời không thể gửi yêu cầu cập nhật kho.</span>
+    </div>
 
     <!-- Progress Card (Visible when executing) -->
     <section id="progress-card" class="progress-card">
@@ -330,6 +332,9 @@
             </div>
             
             <div style="display: flex; gap: 8px;">
+              <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" class="btn btn-outline btn-sm" title="Mở Google Sheet xem toàn bộ nhật ký đổi kho">
+                <i class="fa-solid fa-table"></i> Xem Sheet Nhật Ký
+              </a>
               <button id="btn-export-excel" class="btn btn-success btn-sm" style="display: none;">
                 <i class="fa-solid fa-file-excel"></i> Xuất Excel
               </button>
@@ -384,7 +389,7 @@
                       <th style="width: 50px;">STT</th>
                       <th>Mã đơn hàng</th>
                       <th>Loại kho</th>
-                      <th>Kho đích</th>
+                      <th>Đổi kho (Kho cũ ➔ Kho mới)</th>
                       <th>Thời gian</th>
                     </tr>
                   </thead>
@@ -414,7 +419,7 @@
                       <th style="width: 50px;">STT</th>
                       <th>Mã đơn hàng</th>
                       <th>Trạng thái</th>
-                      <th>Kho đích yêu cầu</th>
+                      <th>Đổi kho (Kho cũ ➔ Kho yêu cầu)</th>
                       <th>Thời gian</th>
                     </tr>
                   </thead>
@@ -742,6 +747,130 @@
         <button id="btn-save-sync-url" class="btn btn-primary">
           <i class="fa-solid fa-floppy-disk"></i> Lưu Cấu Hình
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOGIN OVERLAY MODAL (LỚP BẢO MẬT ĐĂNG NHẬP ĐỂ GHI LOG) -->
+  <div id="login-overlay" class="login-overlay show">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-logo"><i class="fa-solid fa-boxes-packing"></i></div>
+        <h2>GHN Revert Hub</h2>
+        <p>Vui lòng đăng nhập để thao tác và ghi nhận nhật ký đổi kho</p>
+      </div>
+
+      <form id="login-form">
+        <div id="login-error" class="login-error" style="display: none;"></div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" for="login-username">Tài khoản / Mã nhân viên / Họ tên <span class="req">*</span></label>
+          <div class="input-with-icon">
+            <i class="fa-solid fa-user"></i>
+            <input 
+              type="text" 
+              id="login-username" 
+              class="combobox-input" 
+              placeholder="Ví dụ: nv_nam hoặc Nguyễn Văn Nam" 
+              required 
+              autocomplete="username" 
+            />
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 18px;">
+          <label class="form-label" for="login-password">Mật khẩu (nếu có)</label>
+          <div class="input-with-icon">
+            <i class="fa-solid fa-lock"></i>
+            <input 
+              type="password" 
+              id="login-password" 
+              class="combobox-input" 
+              placeholder="Nhập mật khẩu (nếu đã được cấp)" 
+              autocomplete="current-password" 
+            />
+          </div>
+        </div>
+
+        <button type="submit" id="btn-login-submit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 12px; font-weight: 700;">
+          <i class="fa-solid fa-right-to-bracket"></i> ĐĂNG NHẬP
+        </button>
+      </form>
+
+      <!-- Google Sign In Button Container -->
+      <div id="google-login-wrap" style="display: none; margin-top: 14px; text-align: center;">
+        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">hoặc</div>
+        <div id="google-login-btn"></div>
+      </div>
+
+      <div class="login-footer">
+        <p><i class="fa-solid fa-shield"></i> Mọi thao tác đổi kho đều được tự động lưu vào Google Sheet nội bộ.</p>
+        <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" style="color: var(--primary); font-size: 12px; font-weight: 600; text-decoration: underline; display: inline-flex; align-items: center; gap: 5px; margin-top: 6px;">
+          <i class="fa-solid fa-table"></i> Xem Bảng Nhật Ký Đổi Kho Trực Tuyến
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADMIN MANAGEMENT MODAL (QUẢN LÝ CHIA SẺ TOKEN) -->
+  <div id="modal-admin" class="modal-overlay">
+    <div class="modal-box" style="max-width: 550px;">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-shield-halved" style="color: var(--primary);"></i> Quản Trị Chia Sẻ Token (Quản Lý)</h3>
+        <button id="btn-close-admin" class="modal-close-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Switch Bật / Tắt Chia Sẻ -->
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <div>
+              <div style="font-weight: 700; font-size: 14px; color: #0f172a;">Quyền Sử Dụng Của Nhân Viên</div>
+              <div id="admin-share-label" style="font-size: 12.5px; margin-top: 4px; font-weight: 600; color: #047857;">
+                Đang BẬT - Nhân viên đã đăng nhập có thể sử dụng
+              </div>
+            </div>
+            <label class="switch-wrap">
+              <input type="checkbox" id="admin-share-toggle" class="switch-input" checked />
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+          <p style="font-size: 12px; color: var(--text-muted); margin-top: 10px; margin-bottom: 0;">
+            * Khi bạn TẮT công tắc này, toàn bộ nhân viên sẽ bị khóa chức năng đổi kho ngay lập tức, không ai có thể tự ý sử dụng.
+          </p>
+        </div>
+
+        <!-- Thông tin Token trên Cloud -->
+        <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 10px; padding: 14px; margin-bottom: 16px; font-size: 12.5px; color: #065f46;">
+          <div id="admin-token-info">Đang kiểm tra thông tin Token trên Cloud...</div>
+        </div>
+
+        <!-- Cập nhật Token thủ công khẩn cấp nếu cần -->
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" for="admin-token-input">Cập nhật Token mới thủ công (nếu không dùng Tampermonkey):</label>
+          <div style="display: flex; gap: 8px;">
+            <input 
+              type="password" 
+              id="admin-token-input" 
+              class="combobox-input" 
+              style="font-family: monospace; font-size: 12.5px;" 
+              placeholder="Dán mã Token GHN mới vào đây..." 
+            />
+            <button id="btn-admin-push-token" class="btn btn-primary btn-sm" style="white-space: nowrap;">
+              <i class="fa-solid fa-cloud-arrow-up"></i> Cập Nhật
+            </button>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 10px;">
+          <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" class="btn btn-outline btn-sm" style="width: 100%; justify-content: center;">
+            <i class="fa-solid fa-table"></i> Mở Bảng Nhật Ký Đổi Kho &amp; Quản Lý Tài Khoản (Google Sheet)
+          </a>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btn-close-admin-footer" class="btn btn-secondary">Đóng</button>
       </div>
     </div>
   </div>
