@@ -503,15 +503,23 @@
 
   // --- LOGIN SCREEN ---
   function showLoginScreen(message = '') {
-    els.loginOverlay.classList.add('show');
+    if (els.loginOverlay) {
+      els.loginOverlay.style.display = 'flex';
+      els.loginOverlay.classList.add('show');
+    }
     document.body.classList.add('auth-locked');
-    els.loginError.textContent = message;
-    els.loginError.style.display = message ? 'block' : 'none';
-    setTimeout(() => els.loginUsername.focus(), 50);
+    if (els.loginError) {
+      els.loginError.textContent = message;
+      els.loginError.style.display = message ? 'block' : 'none';
+    }
+    if (els.loginUsername) setTimeout(() => els.loginUsername.focus(), 50);
   }
 
   function hideLoginScreen() {
-    els.loginOverlay.classList.remove('show');
+    if (els.loginOverlay) {
+      els.loginOverlay.classList.remove('show');
+      els.loginOverlay.style.display = 'none';
+    }
     document.body.classList.remove('auth-locked');
   }
 
@@ -1915,26 +1923,37 @@
 
   // --- EVENT LISTENERS INITIALIZATION ---
   function initEvents() {
-    // 1. Token Input & Visibility Toggle
-    els.btnToggleToken.addEventListener('click', () => {
-      const isPassword = els.tokenInput.type === 'password';
-      els.tokenInput.type = isPassword ? 'text' : 'password';
-      els.btnToggleToken.innerHTML = isPassword ? '<i class="fa-solid fa-eye-slash"></i>' : '<i class="fa-solid fa-eye"></i>';
-    });
-
-    els.btnSaveToken.addEventListener('click', () => {
-      const val = els.tokenInput.value.trim();
-      if (!val) {
-        showToast('Vui lòng nhập Token!', 'error');
-        return;
-      }
-      checkTokenValidity(val, true);
-    });
-
-    els.btnCheckToken.addEventListener('click', () => {
-      const val = els.tokenInput.value.trim();
-      checkTokenValidity(val, true);
-    });
+    // 1. Auth & Admin Listeners
+    if (els.loginForm) {
+      els.loginForm.addEventListener('submit', handleLoginSubmit);
+    }
+    if (els.btnLogout) {
+      els.btnLogout.addEventListener('click', handleLogout);
+    }
+    if (els.btnRefreshStatus) {
+      els.btnRefreshStatus.addEventListener('click', () => {
+        showToast('Đang kiểm tra kết nối Token...', 'info', 2000);
+        refreshGatewayStatus(true);
+      });
+    }
+    if (els.btnOpenAdmin) {
+      els.btnOpenAdmin.addEventListener('click', () => {
+        renderAdminPanel();
+        els.modalAdmin.classList.add('show');
+      });
+    }
+    if (els.btnCloseAdmin) {
+      els.btnCloseAdmin.addEventListener('click', () => els.modalAdmin.classList.remove('show'));
+    }
+    if (els.btnCloseAdminFooter) {
+      els.btnCloseAdminFooter.addEventListener('click', () => els.modalAdmin.classList.remove('show'));
+    }
+    if (els.adminShareToggle) {
+      els.adminShareToggle.addEventListener('change', handleAdminShareToggle);
+    }
+    if (els.btnAdminPushToken) {
+      els.btnAdminPushToken.addEventListener('click', handleAdminPushToken);
+    }
 
     // 2. Orders Textarea & Actions
     els.ordersTextarea.addEventListener('input', () => {
@@ -2247,38 +2266,6 @@
     els.btnGuideOk.addEventListener('click', () => {
       els.modalGuide.classList.remove('show');
     });
-
-    // 11. Auth & Admin Listeners
-    if (els.loginForm) {
-      els.loginForm.addEventListener('submit', handleLoginSubmit);
-    }
-    if (els.btnLogout) {
-      els.btnLogout.addEventListener('click', handleLogout);
-    }
-    if (els.btnRefreshStatus) {
-      els.btnRefreshStatus.addEventListener('click', () => {
-        showToast('Đang kiểm tra kết nối Token...', 'info', 2000);
-        refreshGatewayStatus(true);
-      });
-    }
-    if (els.btnOpenAdmin) {
-      els.btnOpenAdmin.addEventListener('click', () => {
-        renderAdminPanel();
-        els.modalAdmin.classList.add('show');
-      });
-    }
-    if (els.btnCloseAdmin) {
-      els.btnCloseAdmin.addEventListener('click', () => els.modalAdmin.classList.remove('show'));
-    }
-    if (els.btnCloseAdminFooter) {
-      els.btnCloseAdminFooter.addEventListener('click', () => els.modalAdmin.classList.remove('show'));
-    }
-    if (els.adminShareToggle) {
-      els.adminShareToggle.addEventListener('change', handleAdminShareToggle);
-    }
-    if (els.btnAdminPushToken) {
-      els.btnAdminPushToken.addEventListener('click', handleAdminPushToken);
-    }
 
     // Close modals on background click
     els.modalConfirm.addEventListener('click', (e) => {
