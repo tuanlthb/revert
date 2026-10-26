@@ -309,9 +309,11 @@
     let res;
     try {
       // text/plain => không phát sinh CORS preflight với Google Apps Script
+      // credentials: 'omit' => tuyệt đối không gửi cookie Google của trình duyệt, tránh 100% lỗi 404 multi-account của Google Apps Script
       res = await fetch(API_GATEWAY_URL, {
         method: 'POST',
         redirect: 'follow',
+        credentials: 'omit',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(body)
       });

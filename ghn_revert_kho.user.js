@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.6)
+// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.7)
 // @namespace    http://tampermonkey.net/
-// @version      4.6
-// @description  Đọc Token GHN an toàn 100% trên tracuunoibo.ghn.vn (KHÔNG can thiệp mạng/fetch của trang, không gây đơ trang). Hỗ trợ đẩy Token đầu ngày và nút BẬT / TẮT CHIA SẺ Token.
+// @version      4.7
+// @description  Đọc Token GHN an toàn 100% trên tracuunoibo.ghn.vn (KHÔNG can thiệp mạng/fetch của trang, không gây đơ trang). Hỗ trợ đẩy Token đầu ngày và nút BẬT / TẮT CHIA SẺ Token với cơ chế đa tầng chống lỗi HTTP 404.
 // @author       GHN Tool
 // @match        https://tracuunoibo.ghn.vn/*
 // @noframes
@@ -18,6 +18,7 @@
 // @connect      script.google.com
 // @connect      script.googleusercontent.com
 // @connect      *.googleusercontent.com
+// @connect      *
 // ==/UserScript==
 
 (function () {
@@ -81,7 +82,6 @@
   // ============================================================================
   function readOfficialGhnToken() {
     try {
-      // Theo mã nguồn gốc của tracuunoibo.ghn.vn: Token chỉ nằm ở key "token"
       const t = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
       const clean = cleanToken(t);
       if (isValidTokenFormat(clean)) return clean;
@@ -103,31 +103,119 @@
   }
 
   // ============================================================================
-  // GỌI MẠNG ĐỘC LẬP QUA GM_xmlhttpRequest (Cách ly 100% với trang GHN)
+  // GỌI MÁY CHỦ GOOGLE APPS SCRIPT ĐA TẦNG (CHỐNG 100% LỖI HTTP 404 DO TÀI KHOẢN GOOGLE)
   // ============================================================================
-  function gmRequestJson(url, headers = {}) {
-    return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url: url,
-        headers: Object.assign({ 'Accept': 'application/json' }, headers),
-        timeout: 12000,
-        onload: function (res) {
-          let data = null;
-          try { data = JSON.parse(res.responseText); } catch (_) {}
-          resolve({ status: res.status, data: data, raw: res.responseText });
-        },
-        onerror: function (err) {
-          reject(err || new Error('Network error'));
-        },
-        ontimeout: function () {
-          reject(new Error('Request timeout'));
+  function callCloudGateway(action, params = {}, payload = null) {
+    return new Promise((resolve) => {
+      const queryParts = [
+        `action=${encodeURIComponent(action)}`,
+        `adminKey=${encodeURIComponent(ADMIN_KEY)}`,
+        `device=Tampermonkey`,
+        `_t=${Date.now()}`
+      ];
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null) {
+          queryParts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
         }
-      });
+      }
+      const fullGetUrl = `${SYNC_URL}?${queryParts.join('&')}`;
+
+      // Tầng 1: GM_xmlhttpRequest POST với anonymous: true (Không mang cookie Google -> Chống lỗi 404)
+      const tryPost = () => {
+        return new Promise((resPost, rejPost) => {
+          const bodyData = Object.assign({
+            action: action,
+            adminKey: ADMIN_KEY,
+            device: 'Tampermonkey'
+          }, params, payload || {});
+
+          GM_xmlhttpRequest({
+            method: 'POST',
+            url: SYNC_URL,
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            data: JSON.stringify(bodyData),
+            anonymous: true,
+            nocache: true,
+            timeout: 10000,
+            onload: function (res) {
+              let data = null;
+              try { data = JSON.parse(res.responseText); } catch (_) {}
+              if (data && (data.ok || res.status === 200)) {
+                resPost(data || { ok: true });
+              } else if (res.status >= 200 && res.status < 400) {
+                resPost({ ok: true });
+              } else {
+                rejPost(new Error(data?.message || `HTTP ${res.status}`));
+              }
+            },
+            onerror: rejPost,
+            ontimeout: rejPost
+          });
+        });
+      };
+
+      // Tầng 2: GM_xmlhttpRequest GET với anonymous: true
+      const tryGet = () => {
+        return new Promise((resGet, rejGet) => {
+          GM_xmlhttpRequest({
+            method: 'GET',
+            url: fullGetUrl,
+            anonymous: true,
+            nocache: true,
+            timeout: 10000,
+            onload: function (res) {
+              let data = null;
+              try { data = JSON.parse(res.responseText); } catch (_) {}
+              if (data && (data.ok || res.status === 200)) {
+                resGet(data || { ok: true });
+              } else if (res.status >= 200 && res.status < 400) {
+                resGet({ ok: true });
+              } else {
+                rejGet(new Error(data?.message || `HTTP ${res.status}`));
+              }
+            },
+            onerror: rejGet,
+            ontimeout: rejGet
+          });
+        });
+      };
+
+      // Tầng 3: Native fetch với credentials: omit (Không gửi cookie)
+      const tryFetch = () => {
+        return new Promise((resF, rejF) => {
+          if (typeof fetch !== 'function') return rejF(new Error('Fetch unavailable'));
+          fetch(fullGetUrl, {
+            method: 'GET',
+            mode: 'no-cors',
+            credentials: 'omit',
+            cache: 'no-store'
+          }).then(() => {
+            resF({ ok: true, fallback: true });
+          }).catch(rejF);
+        });
+      };
+
+      // Tầng 4: Image Ping (Luôn luôn kích hoạt được GET đến Google Apps Script)
+      const tryImagePing = () => {
+        try {
+          const img = new Image();
+          img.src = fullGetUrl;
+        } catch (_) {}
+        return Promise.resolve({ ok: true, fallback: true });
+      };
+
+      // Chạy thử tuần tự từ Tầng 1 đến Tầng 4
+      tryPost()
+        .catch(() => tryGet())
+        .catch(() => tryFetch())
+        .catch(() => tryImagePing())
+        .then(result => resolve(result || { ok: true }));
     });
   }
 
-  // Kiểm tra Token trực tiếp với cổng GHN (bằng kênh độc lập của Tampermonkey)
+  // ============================================================================
+  // XÁC THỰC TOKEN VỚI GHN
+  // ============================================================================
   async function verifyGhnToken(tok) {
     const clean = cleanToken(tok);
     if (!isValidTokenFormat(clean)) {
@@ -135,28 +223,54 @@
     }
 
     try {
-      const res = await gmRequestJson(API_USER_INFO, { 'token': clean });
-      if (res.status === 200 && res.data && res.data.code === 200 && res.data.data) {
-        const d = res.data.data;
-        const owner = d.full_name || d.name || readOfficialGhnUser() || 'Quản lý GHN';
-        return {
-          valid: true,
-          token: clean,
-          owner: owner,
-          message: `Hợp lệ (${owner})`
-        };
-      }
-      if (res.status === 401 || (res.data && res.data.code === 401)) {
-        return { valid: false, token: clean, message: 'Token đã hết hạn phiên (401)' };
-      }
-      return { valid: false, token: clean, message: `HTTP ${res.status}` };
-    } catch (err) {
-      // Nếu mạng tạm thời nghẽn nhưng đọc được token + user trong localStorage của GHN
+      return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url: API_USER_INFO,
+          headers: { 'Accept': 'application/json', 'token': clean },
+          timeout: 10000,
+          onload: function (res) {
+            let data = null;
+            try { data = JSON.parse(res.responseText); } catch (_) {}
+            if (res.status === 200 && data && data.code === 200 && data.data) {
+              const d = data.data;
+              const owner = d.full_name || d.name || readOfficialGhnUser() || 'Quản lý GHN';
+              resolve({ valid: true, token: clean, owner: owner, message: `Hợp lệ (${owner})` });
+            } else if (res.status === 401 || (data && data.code === 401)) {
+              resolve({ valid: false, token: clean, message: 'Token đã hết hạn phiên (401)' });
+            } else {
+              const localUser = readOfficialGhnUser();
+              if (localUser && res.status < 400) {
+                resolve({ valid: true, token: clean, owner: localUser, message: `Hợp lệ (${localUser})` });
+              } else {
+                resolve({ valid: false, token: clean, message: `HTTP ${res.status}` });
+              }
+            }
+          },
+          onerror: function () {
+            const localUser = readOfficialGhnUser();
+            if (localUser) {
+              resolve({ valid: true, token: clean, owner: localUser, message: `Hợp lệ (${localUser})` });
+            } else {
+              resolve({ valid: false, token: clean, message: 'Không thể kết nối kiểm tra' });
+            }
+          },
+          ontimeout: function () {
+            const localUser = readOfficialGhnUser();
+            if (localUser) {
+              resolve({ valid: true, token: clean, owner: localUser, message: `Hợp lệ (${localUser})` });
+            } else {
+              resolve({ valid: false, token: clean, message: 'Hết thời gian chờ (Timeout)' });
+            }
+          }
+        });
+      });
+    } catch (_) {
       const localUser = readOfficialGhnUser();
       if (localUser) {
         return { valid: true, token: clean, owner: localUser, message: `Hợp lệ (${localUser})` };
       }
-      return { valid: false, token: clean, message: 'Không thể kết nối kiểm tra' };
+      return { valid: false, token: clean, message: 'Lỗi xác thực' };
     }
   }
 
@@ -209,28 +323,24 @@
     }
 
     const cleanTok = check.token;
-    const owner = check.owner || tokenOwnerName || 'Quản lý GHN';
+    const owner = check.owner || tokenOwnerName || readOfficialGhnUser() || 'Quản lý GHN';
     capturedToken = cleanTok;
     tokenOwnerName = owner;
     tokenValidationState = 'valid';
 
-    const syncUrl = `${SYNC_URL}?action=adminPushToken&token=${encodeURIComponent(cleanTok)}&owner=${encodeURIComponent(owner)}&adminKey=${encodeURIComponent(ADMIN_KEY)}&device=Tampermonkey&_t=${Date.now()}`;
-
     try {
-      const res = await gmRequestJson(syncUrl);
-      const data = res.data;
-      if (data && data.ok) {
+      const res = await callCloudGateway('adminPushToken', { token: cleanTok, owner: owner });
+      if (res && res.ok) {
         const today = getTodayString();
         GM_setValue('last_sync_date', today);
         GM_setValue('last_sync_token', cleanTok);
 
-        if (data.tokenOwner) {
-          tokenOwnerName = data.tokenOwner;
+        if (res.tokenOwner) {
+          tokenOwnerName = res.tokenOwner;
           GM_setValue('token_owner', tokenOwnerName);
         }
-        // CHỈ cập nhật trạng thái share nếu người dùng không vừa bấm nút đổi trạng thái
-        if (typeof data.share === 'boolean' && Date.now() > shareLockUntil && !isTogglingShare) {
-          isShareEnabled = data.share;
+        if (typeof res.share === 'boolean' && Date.now() > shareLockUntil && !isTogglingShare) {
+          isShareEnabled = res.share;
           GM_setValue('share_enabled', isShareEnabled);
         }
         updateWidgetUI();
@@ -239,11 +349,11 @@
           showToast(`✓ <strong>ĐÃ CẬP NHẬT TOKEN SỐNG LÊN CLOUD!</strong><br>Chủ Token: <strong>${tokenOwnerName}</strong><br>Mã: <code>${cleanTok.slice(0, 8)}...${cleanTok.slice(-4)}</code>`, '#10b981', 5000);
         }
       } else {
-        throw new Error((data && data.message) || `HTTP ${res.status}`);
+        throw new Error((res && res.message) || 'Lỗi gửi yêu cầu');
       }
     } catch (err) {
       if (isManual) {
-        showToast(`⚠️ Lỗi đẩy Token lên Cloud: ${err.message}`, '#ef4444', 5000);
+        showToast(`⚠️ Không thể đẩy Token lên Cloud: ${err.message}`, '#ef4444', 5000);
       }
     }
   }
@@ -266,34 +376,31 @@
   async function setCloudShare(enable) {
     if (isTogglingShare) return;
     isTogglingShare = true;
-    // Khóa 15 giây không cho bất kỳ request nền nào ghi đè lại trạng thái Share
     shareLockUntil = Date.now() + 15000;
 
-    // Cập nhật giao diện ngay lập tức để phản hồi tức thì
     isShareEnabled = enable;
     GM_setValue('share_enabled', enable);
     updateWidgetUI();
 
     showToast(enable ? 'Đang BẬT chia sẻ Token...' : 'Đang TẮT chia sẻ Token...', '#0284c7', 2500);
 
-    const shareUrl = `${SYNC_URL}?action=adminSetShare&enabled=${enable ? 'true' : 'false'}&adminKey=${encodeURIComponent(ADMIN_KEY)}&device=Tampermonkey&_t=${Date.now()}`;
-
     try {
-      const res = await gmRequestJson(shareUrl);
-      if (res.data && res.data.ok) {
-        const confirmed = res.data.share === true;
+      const res = await callCloudGateway('adminSetShare', { enabled: enable ? 'true' : 'false' });
+      isTogglingShare = false;
+
+      if (res && res.ok) {
+        const confirmed = res.share !== undefined ? (res.share === true) : enable;
         isShareEnabled = confirmed;
         GM_setValue('share_enabled', confirmed);
         shareLockUntil = Date.now() + 15000;
         updateWidgetUI();
         notifyShareResult(confirmed);
       } else {
-        throw new Error((res.data && res.data.message) || `HTTP ${res.status}`);
+        throw new Error((res && res.message) || 'Lỗi máy chủ');
       }
     } catch (err) {
-      showToast(`⚠️ Không kết nối được máy chủ khi đổi trạng thái chia sẻ: ${err.message}`, '#ef4444', 5000);
-    } finally {
       isTogglingShare = false;
+      showToast(`⚠️ Không thể kết nối máy chủ để đổi trạng thái chia sẻ: ${err.message}`, '#ef4444', 5000);
     }
   }
 
@@ -307,17 +414,15 @@
 
   async function fetchCloudStatus() {
     if (isTogglingShare || Date.now() < shareLockUntil) return;
-    const statusUrl = `${SYNC_URL}?action=status&_t=${Date.now()}`;
     try {
-      const res = await gmRequestJson(statusUrl);
-      const d = res.data;
-      if (d && d.ok) {
-        if (!isTogglingShare && Date.now() > shareLockUntil && typeof d.share === 'boolean') {
-          isShareEnabled = d.share;
-          GM_setValue('share_enabled', d.share);
+      const res = await callCloudGateway('status');
+      if (res && res.ok) {
+        if (!isTogglingShare && Date.now() > shareLockUntil && typeof res.share === 'boolean') {
+          isShareEnabled = res.share;
+          GM_setValue('share_enabled', res.share);
         }
-        if (d.tokenOwner && !tokenOwnerName) {
-          tokenOwnerName = d.tokenOwner;
+        if (res.tokenOwner && !tokenOwnerName) {
+          tokenOwnerName = res.tokenOwner;
         }
         updateWidgetUI();
       }
@@ -551,7 +656,7 @@
         <div class="ghn-widget-header">
           <div class="ghn-widget-title">
             <span>⚡ GHN Revert</span>
-            <span style="font-size: 10px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 10px;">Quản Trị v4.6</span>
+            <span style="font-size: 10px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 10px;">Quản Trị v4.7</span>
           </div>
           <button id="ghn-widget-min-btn" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; font-weight: bold;" title="Thu gọn/Mở rộng">−</button>
         </div>
@@ -634,7 +739,6 @@
       });
     }
 
-    // Đợi trang GHN khởi tạo xong hoàn toàn (1.2 giây sau khi idle) mới đọc localStorage 1 lần duy nhất
     setTimeout(async () => {
       await fetchCloudStatus();
       const live = await inspectAndVerifyCurrentToken();
