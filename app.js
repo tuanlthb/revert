@@ -159,6 +159,7 @@
     whClearBtn: document.getElementById('wh-clear-btn'),
     whDropdown: document.getElementById('wh-dropdown'),
     whTotalCount: document.getElementById('wh-total-count'),
+    btnRefreshWarehouses: document.getElementById('btn-refresh-warehouses'),
     selectedWhPreview: document.getElementById('selected-wh-preview'),
     previewWhName: document.getElementById('preview-wh-name'),
     previewWhMeta: document.getElementById('preview-wh-meta'),
@@ -365,11 +366,30 @@
   }
 
   /**
-   * Gọi API GHN thông minh: nếu có phiên máy chủ thì định tuyến qua proxy (được đính kèm Token quản lý)
+   * Gọi API GHN:
+   * 1. Ưu tiên gọi TRỰC TIẾP từ trình duyệt khi đã có Token (User-Agent chuẩn trình duyệt, CORS cho phép, không bị GHN chặn 404).
+   * 2. Nếu chưa có Token ở client: định tuyến qua Proxy máy chủ (Google Apps Script).
    */
   async function ghnApiFetch(url, options = {}) {
-    const isInternal = url.includes('/internal/') || url.includes('/v3/');
-    if (state.session && (isInternal || !state.token)) {
+    // 1. Nếu trình duyệt đã có Token: gọi trực tiếp từ trình duyệt
+    if (state.token) {
+      try {
+        const headers = Object.assign({
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'token': state.token
+        }, options.headers || {});
+        const res = await fetch(url, Object.assign({}, options, { headers }));
+        if (res.ok || (res.status >= 200 && res.status < 400)) {
+          return res;
+        }
+      } catch (directErr) {
+        console.warn('[GHN Revert] Gọi trực tiếp API GHN lỗi, thử qua proxy máy chủ:', directErr);
+      }
+    }
+
+    // 2. Dự phòng: gọi qua Proxy máy chủ nếu chưa có Token ở client hoặc gọi trực tiếp bị lỗi
+    if (state.session) {
       try {
         const u = new URL(url);
         const query = {};
@@ -390,9 +410,11 @@
           json: async () => res.data
         };
       } catch (e) {
-        // Dự phòng: gọi trực tiếp nếu proxy lỗi
+        console.warn('[GHN Revert] Proxy máy chủ lỗi:', e);
       }
     }
+
+    // 3. Fallback cuối
     const headers = Object.assign({
       'Accept': 'application/json',
       'Content-Type': 'application/json'
@@ -535,7 +557,7 @@
       if (state.selectedWardAddress && state.selectedType !== 1) {
         fetchWardWarehouses(state.selectedWardAddress, state.selectedType);
       }
-      if (state.warehouses.length === 0) fetchWarehousesFromApi();
+      fetchWarehousesFromApi(false);
     } else if (!st.canUse && wasConnected) {
       addLog(`⚠️ Mất kết nối Token: ${st.reason}`, true);
     }
@@ -1316,87 +1338,106 @@
   }
 
   // ==========================================================================
-  // WAREHOUSE DATA & COMBOBOX
+  // WAREHOUSE DATA & COMBOBOX (TỰ ĐỘNG ĐỒNG BỘ 100% KHO MỚI MỞ TỪ GHN)
   // ==========================================================================
   async function initWarehouses() {
-    // 1. First check pre-bundled warehouses.data.js
+    // 1. Kiểm tra cache localStorage (hỗ trợ cả cache ot_warehouse_all_cache của trang GHN gốc)
+    try {
+      const cached = localStorage.getItem('ot_warehouse_all_cache') || localStorage.getItem('ghn_cached_warehouses');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        const list = Array.isArray(parsed) ? parsed : (parsed.warehouses || []);
+        if (Array.isArray(list) && list.length > 500) {
+          state.warehouses = list.map(w => ({
+            id: w.locationId || w.id || w.warehouse_id,
+            name: w.locationName || w.name || w.warehouse_name,
+            address: w.address || ''
+          }));
+          updateWarehouseCountDisplay();
+          addLog(`Đã tải ${state.warehouses.length} bưu cục từ bộ nhớ.`);
+          // Gọi API ngầm để cập nhật thêm các kho mới mở nhất
+          setTimeout(() => fetchWarehousesFromApi(false), 2000);
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Pre-bundled fallback nếu chưa có cache
     if (window.GHN_DEFAULT_WAREHOUSES && Array.isArray(window.GHN_DEFAULT_WAREHOUSES) && window.GHN_DEFAULT_WAREHOUSES.length > 0) {
       state.warehouses = window.GHN_DEFAULT_WAREHOUSES;
       updateWarehouseCountDisplay();
-      addLog(`Đã tải sẵn ${state.warehouses.length} bưu cục/kho từ bộ nhớ.`);
+      addLog(`Đã tải sẵn ${state.warehouses.length} bưu cục/kho từ gói dữ liệu.`);
+      // Tải ngầm API GHN để bổ sung các kho mới mở
+      setTimeout(() => fetchWarehousesFromApi(false), 2000);
       return;
     }
 
-    // 2. Check localStorage cache
-    try {
-      const cached = localStorage.getItem('ghn_cached_warehouses');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 500) {
-          state.warehouses = parsed;
-          updateWarehouseCountDisplay();
-          addLog(`Đã tải ${state.warehouses.length} bưu cục từ bộ nhớ đệm.`);
-          return;
-        }
-      }
-    } catch (_) {}
-
-    // 3. Fallback: try fetching from warehouses.json
-    try {
-      const res = await fetch('./warehouses.json');
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json) && json.length > 0) {
-          state.warehouses = json;
-          updateWarehouseCountDisplay();
-          addLog(`Đã tải ${state.warehouses.length} bưu cục từ warehouses.json.`);
-          return;
-        }
-      }
-    } catch (_) {}
-
-    // 4. Fallback to API directly
-    fetchWarehousesFromApi();
+    // 3. Fallback to API directly
+    fetchWarehousesFromApi(false);
   }
 
-  async function fetchWarehousesFromApi() {
-    els.whTotalCount.textContent = 'Đang tải danh mục kho từ GHN...';
-    try {
-      const res = await ghnApiFetch(`${API_WAREHOUSES}?offset=0&limit=1000`, {
-        method: 'GET'
-      });
-      const data = await res.json();
-      if (data && data.code === 200 && data.data && data.data.warehouses) {
-        let list = data.data.warehouses.map(w => ({
-          id: w.locationId,
-          name: w.locationName,
-          address: w.address
-        }));
+  let isFetchingWarehouses = false;
+  async function fetchWarehousesFromApi(isManual = false) {
+    if (isFetchingWarehouses) return;
+    isFetchingWarehouses = true;
 
-        if (data.data.total > 1000) {
-          const res2 = await ghnApiFetch(`${API_WAREHOUSES}?offset=1000&limit=1000`, {
-            method: 'GET'
-          });
-          const data2 = await res2.json();
-          if (data2 && data2.code === 200 && data2.data && data2.data.warehouses) {
-            list = list.concat(data2.data.warehouses.map(w => ({
-              id: w.locationId,
-              name: w.locationName,
-              address: w.address
-            })));
-          }
+    if (isManual) {
+      els.whTotalCount.textContent = 'Đang đồng bộ danh mục kho từ GHN...';
+      showToast('Đang tải danh mục kho mới nhất trực tiếp từ hệ thống GHN...', 'info', 3000);
+    }
+
+    try {
+      let list = [];
+      let offset = 0;
+      const limit = 1000;
+      let total = null;
+
+      while (true) {
+        const res = await ghnApiFetch(`${API_WAREHOUSES}?offset=${offset}&limit=${limit}`, {
+          method: 'GET'
+        });
+        const data = await res.json();
+        if (!data || data.code !== 200 || !data.data || !Array.isArray(data.data.warehouses)) {
+          break;
         }
 
+        const chunk = data.data.warehouses.map(w => ({
+          id: w.locationId || w.id,
+          name: w.locationName || w.name,
+          address: w.address || ''
+        }));
+        list = list.concat(chunk);
+        total = data.data.total !== undefined ? data.data.total : total;
+
+        if (chunk.length < limit || (total !== null && list.length >= total)) {
+          break;
+        }
+        offset += limit;
+      }
+
+      if (list.length > 0) {
         state.warehouses = list;
         updateWarehouseCountDisplay();
-        addLog(`Đã đồng bộ ${list.length} bưu cục từ GHN API.`);
+        addLog(`✓ Đã đồng bộ mới nhất ${list.length} bưu cục/kho từ GHN API.`);
         try {
           localStorage.setItem('ghn_cached_warehouses', JSON.stringify(list));
+          localStorage.setItem('ot_warehouse_all_cache', JSON.stringify({
+            cached_at: Date.now(),
+            warehouses: list
+          }));
         } catch (_) {}
+        if (isManual) {
+          showToast(`✓ Đã cập nhật thành công ${list.length} kho từ GHN (đầy đủ kho mới nhất)!`, 'success', 5000);
+        }
       }
     } catch (err) {
-      els.whTotalCount.textContent = 'Chưa tải được danh mục kho';
+      if (isManual) {
+        showToast(`Không thể tải kho từ GHN (${err.message}). Đang dùng danh sách hiện có.`, 'warning');
+      }
+      updateWarehouseCountDisplay();
       addLog(`Không thể tải bưu cục từ API: ${err.message}`, true);
+    } finally {
+      isFetchingWarehouses = false;
     }
   }
 
@@ -2187,11 +2228,9 @@
     els.btnCleanOrders.addEventListener('click', cleanOrderInput);
     els.btnClearOrders.addEventListener('click', () => {
       if (!els.ordersTextarea.value.trim()) return;
-      if (confirm('Bạn có chắc chắn muốn xóa toàn bộ danh sách đơn?')) {
-        els.ordersTextarea.value = '';
-        updateOrderCounter();
-        showToast('Đã xóa toàn bộ đơn.', 'info');
-      }
+      els.ordersTextarea.value = '';
+      updateOrderCounter();
+      showToast('Đã xóa toàn bộ đơn.', 'info');
     });
 
     // 3. Warehouse Type Radio Cards
@@ -2379,6 +2418,19 @@
     els.whClearBtn.addEventListener('click', () => {
       clearSelectedWarehouse();
     });
+
+    if (els.btnRefreshWarehouses) {
+      els.btnRefreshWarehouses.addEventListener('click', async () => {
+        els.btnRefreshWarehouses.disabled = true;
+        els.btnRefreshWarehouses.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang tải...';
+        try {
+          await fetchWarehousesFromApi(true);
+        } finally {
+          els.btnRefreshWarehouses.disabled = false;
+          els.btnRefreshWarehouses.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Cập nhật kho mới';
+        }
+      });
+    }
 
     document.addEventListener('click', (e) => {
       if (!els.whSearchInput.contains(e.target) && !els.whDropdown.contains(e.target)) {
