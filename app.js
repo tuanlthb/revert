@@ -52,14 +52,14 @@
   const GOOGLE_CLIENT_ID = '';
 
   // Token dự phòng (chế độ phát triển nội bộ)
-  const FIXED_DEFAULT_TOKEN = 'ed19b5b2-74a1-42f5-bdd3-d3deecd16278';
+  const FIXED_DEFAULT_TOKEN = '';
 
   // --- APPLICATION STATE ---
   const state = {
     session: '',
     authUser: null,
     gateway: null,
-    token: FIXED_DEFAULT_TOKEN,
+    token: '',
     isTokenValid: false,
     user: null,
     warehouses: [],
@@ -428,6 +428,8 @@
     state.authUser = st.user || state.authUser;
     if (st.token) {
       state.token = st.token;
+    } else if (!st.canUse) {
+      state.token = '';
     }
     state.gateway = {
       share: !!st.share,
@@ -462,13 +464,14 @@
 
     // Connection status & warning banner
     if (st.canUse) {
-      setConnectionStatus('ready', 'Đã kết nối Token GHN (Sẵn sàng)');
+      const timeStr = st.tokenUpdatedAt ? ` (Cập nhật ${new Date(st.tokenUpdatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })})` : '';
+      setConnectionStatus('ready', `Đã kết nối Token (${st.tokenOwner || 'Quản lý'}${timeStr})`);
       if (els.gatewayBanner) els.gatewayBanner.style.display = 'none';
       if (els.hubShareBadge) els.hubShareBadge.style.display = 'none';
     } else {
       const isLocked = st.share === false && st.tokenAlive;
       const statusType = isLocked ? 'locked' : 'disconnected';
-      const statusText = isLocked ? 'Quản lý đang TẮT chia sẻ Token' : (st.reason || 'Chưa kết nối Token');
+      const statusText = isLocked ? 'Quản lý đang TẮT chia sẻ Token' : (st.reason || 'Chưa có Token GHN của Quản lý');
       setConnectionStatus(statusType, statusText);
       if (els.gatewayBannerText) {
         els.gatewayBannerText.textContent = st.reason || (isLocked
@@ -1564,8 +1567,8 @@
       return false;
     }
 
-    if (!state.isTokenValid) {
-      const msg = (state.gateway && state.gateway.reason) || 'Hệ thống chưa kết nối được Token GHN của Quản lý hoặc Quản lý đang TẮT chia sẻ.';
+    if (!state.isTokenValid || !state.token || state.token.length < 20) {
+      const msg = (state.gateway && state.gateway.reason) || 'Hệ thống chưa kết nối được Token GHN sống của Quản lý hoặc Quản lý đang TẮT chia sẻ.';
       showToast(msg, 'error', 4500);
       return false;
     }
@@ -1828,7 +1831,14 @@
 
         // Nếu GHN trả về lỗi cấp cao
         if (ghnJson && ghnJson.code !== 200 && (!ghnData.fail_order_codes || ghnData.fail_order_codes.length === 0)) {
-          const errMsg = ghnJson.code_message_value || ghnJson.message || `Lỗi GHN (${ghnJson.code})`;
+          const isTokenInvalid = ghnJson.code === 401 ||
+            String(ghnJson.code_message || '').toUpperCase().includes('TOKEN') ||
+            String(ghnJson.message || '').toLowerCase().includes('token');
+
+          const errMsg = isTokenInvalid
+            ? 'Token GHN của Quản lý đã hết hạn. Quản lý cần mở tracuunoibo.ghn.vn và bấm nút "⚡ Đẩy Token" để làm mới.'
+            : (ghnJson.code_message_value || ghnJson.message || `Lỗi GHN (${ghnJson.code})`);
+
           chunk.forEach(code => {
             state.results.failed.push({
               code: code,
@@ -1836,6 +1846,15 @@
               time: nowStr
             });
           });
+
+          if (isTokenInvalid) {
+            state.isTokenValid = false;
+            setConnectionStatus('disconnected', 'Token Quản lý đã hết hạn (Cần Quản lý đẩy Token)');
+            showToast('⚠️ Token GHN của Quản lý đã hết hạn! Vui lòng liên hệ Quản lý mở tracuunoibo.ghn.vn và bấm nút "⚡ Đẩy Token".', 'error', 8000);
+            addLog(`❌ DỪNG TIẾN TRÌNH: Token GHN không hợp lệ hoặc đã hết hạn phiên làm việc.`, true);
+            state.shouldStop = true;
+            break;
+          }
         }
 
         const successCount = ghnData.success_order_codes?.length || 0;

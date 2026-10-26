@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   
   <!-- Custom Styles -->
-  <link rel="stylesheet" href="styles.css?v=4.3" />
+  <link rel="stylesheet" href="styles.css?v=4.4" />
 
   <!-- SheetJS for Excel import/export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -41,10 +41,6 @@
       </div>
 
       <div class="header-actions">
-        <!-- Nhật ký Google Sheet chỉ dành cho Quản lý -->
-        <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" id="header-sheet-link" class="btn btn-outline btn-sm admin-only" style="display: none;" title="Mở bảng Google Sheet xem nhật ký đổi kho trực tuyến (Dành cho Quản lý)">
-          <i class="fa-solid fa-table"></i> Nhật Ký Google Sheet
-        </a>
         <div id="token-pill" class="token-status-pill">
           <span class="status-dot"></span>
           <span id="token-status-text">Đang kết nối...</span>
@@ -333,9 +329,6 @@
             </div>
             
             <div style="display: flex; gap: 8px;">
-              <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" id="results-sheet-link" class="btn btn-outline btn-sm admin-only" style="display: none;" title="Mở Google Sheet xem toàn bộ nhật ký đổi kho (Dành cho Quản lý)">
-                <i class="fa-solid fa-table"></i> Xem Sheet Nhật Ký
-              </a>
               <button id="btn-export-excel" class="btn btn-success btn-sm" style="display: none;">
                 <i class="fa-solid fa-file-excel"></i> Xuất Excel
               </button>
@@ -880,6 +873,6 @@
   <script src="warehouses.data.js?v=4.3"></script>
 
   <!-- Main Application Logic -->
-  <script src="app.js?v=4.3"></script>
+  <script src="app.js?v=4.4"></script>
 </body>
 </html>

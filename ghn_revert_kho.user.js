@@ -1,13 +1,14 @@
 // ==UserScript==
-// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.3)
+// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.4)
 // @namespace    http://tampermonkey.net/
-// @version      4.3
+// @version      4.4
 // @description  Bắt Token GHN trên tracuunoibo.ghn.vn (Đồng bộ 1 lần duy nhất đầu ngày hoặc khi bấm nút, không chạy ngầm liên tục). Cung cấp NÚT BẬT / TẮT CHIA SẺ Token trực tiếp trên màn hình GHN.
 // @author       GHN Tool
 // @match        https://tracuunoibo.ghn.vn/*
+// @noframes
 // @updateURL    https://tuanlthb.github.io/revert/ghn_revert_kho.user.js
 // @downloadURL  https://tuanlthb.github.io/revert/ghn_revert_kho.user.js
-// @run-at       document-end
+// @run-at       document-start
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setClipboard
@@ -56,14 +57,152 @@
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   }
 
-  // Lấy Token từ bộ nhớ phiên đăng nhập của GHN (không can thiệp Fetch/XHR để bảo đảm an toàn cho tài khoản)
-  function extractTokenFromStorage() {
+  // ============================================================================
+  // PASSIVE TOKEN SNIFFER (Zero network requests, Zero loop, 100% an toàn)
+  // ============================================================================
+  // Bắt Token khi trang tracuunoibo.ghn.vn tự động gửi request API của hệ thống
+  function registerCapturedToken(tok, source = 'Auto') {
+    const clean = cleanToken(tok);
+    if (!isValidToken(clean)) return;
+
+    if (capturedToken !== clean) {
+      capturedToken = clean;
+      try {
+        localStorage.setItem('ghn_active_token', clean);
+      } catch (_) {}
+      console.log(`[GHN Revert v4.4] Đã bắt được Token từ ${source}: ${clean.slice(0, 8)}...`);
+      updateWidgetUI();
+      // Tự động kiểm tra đồng bộ đầu ngày (nếu hôm nay chưa đồng bộ)
+      checkDailySync(clean, false);
+    }
+  }
+
+  // 1. Hook passive XMLHttpRequest
+  try {
+    const origSetHeader = pageWindow.XMLHttpRequest.prototype.setRequestHeader;
+    pageWindow.XMLHttpRequest.prototype.setRequestHeader = function (key, value) {
+      try {
+        if (String(key || '').toLowerCase() === 'token' && isValidToken(value)) {
+          registerCapturedToken(String(value), 'XHR Header');
+        }
+      } catch (_) {}
+      return origSetHeader.apply(this, arguments);
+    };
+  } catch (_) {}
+
+  // 2. Hook passive fetch
+  try {
+    const origFetch = pageWindow.fetch;
+    pageWindow.fetch = function (input, init) {
+      try {
+        if (init && init.headers) {
+          let tok = null;
+          if (typeof init.headers.get === 'function') {
+            tok = init.headers.get('token') || init.headers.get('Token');
+          } else if (typeof init.headers === 'object') {
+            tok = init.headers['token'] || init.headers['Token'];
+          }
+          if (isValidToken(tok)) {
+            registerCapturedToken(tok, 'Fetch Header');
+          }
+        }
+      } catch (_) {}
+      return origFetch.apply(this, arguments);
+    };
+  } catch (_) {}
+
+  // ============================================================================
+  // DEEP STORAGE SCAN FOR TOKEN
+  // ============================================================================
+  function scanAllStorageForToken() {
+    if (isValidToken(capturedToken)) return capturedToken;
+
+    // Kiểm tra token vừa lưu trong phiên làm việc
     try {
-      const raw = localStorage.getItem('token') || sessionStorage.getItem('token');
-      const t = cleanToken(raw);
-      if (isValidToken(t)) return t;
+      const active = localStorage.getItem('ghn_active_token');
+      if (isValidToken(active)) return cleanToken(active);
     } catch (_) {}
+
+    const isCandidate = (v) => {
+      if (!v || typeof v !== 'string') return false;
+      const clean = v.trim().replace(/^["']+|["']+$/g, '');
+      // Format UUID 36 ký tự (chuẩn Token GHN nội bộ) hoặc JWT
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) {
+        return clean;
+      }
+      if (/^eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(clean)) {
+        return clean;
+      }
+      return false;
+    };
+
+    // 1. Quét các key thông dụng
+    const commonKeys = ['token', 'accessToken', 'access_token', 'TOKEN', 'ACCESS_TOKEN', 'auth_token', 'jwt', 'ghn_token'];
+    for (const k of commonKeys) {
+      try {
+        const v1 = localStorage.getItem(k);
+        const c1 = isCandidate(v1);
+        if (c1) return c1;
+        const v2 = sessionStorage.getItem(k);
+        const c2 = isCandidate(v2);
+        if (c2) return c2;
+      } catch (_) {}
+    }
+
+    // 2. Quét toàn bộ localStorage
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        const v = localStorage.getItem(k);
+        const c = isCandidate(v);
+        if (c) return c;
+        if (v && (v.startsWith('{') || v.startsWith('["'))) {
+          try {
+            const parsed = JSON.parse(v);
+            if (parsed && typeof parsed === 'object') {
+              for (const subKey of ['token', 'accessToken', 'access_token', 'jwt']) {
+                if (parsed[subKey] && isCandidate(parsed[subKey])) {
+                  return cleanToken(parsed[subKey]);
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+
+    // 3. Quét cookie
+    try {
+      const cookies = document.cookie.split(';');
+      for (const cookie of cookies) {
+        const parts = cookie.trim().split('=');
+        if (parts.length >= 2) {
+          const val = parts.slice(1).join('=');
+          const c = isCandidate(val);
+          if (c) return c;
+        }
+      }
+    } catch (_) {}
+
     return null;
+  }
+
+  // Tìm tên người dùng đang đăng nhập trên trang GHN
+  function detectUserName() {
+    try {
+      const userEl = document.querySelector('.user-name, .username, .user-info, .profile-name, .user-profile');
+      if (userEl && userEl.textContent.trim()) {
+        return userEl.textContent.trim();
+      }
+      const rawUser = localStorage.getItem('user') || localStorage.getItem('userInfo');
+      if (rawUser) {
+        const u = JSON.parse(rawUser);
+        if (u.name || u.full_name || u.username) {
+          return u.name || u.full_name || u.username;
+        }
+      }
+    } catch (_) {}
+    return '';
   }
 
   // ============================================================================
@@ -72,25 +211,32 @@
   function pushTokenToCloud(token, isManual = false) {
     if (!isValidToken(token)) return;
     const cleanTok = cleanToken(token);
+    const owner = tokenOwnerName || detectUserName() || 'Quản lý GHN';
     if (isManual) showToast('Đang đẩy Token lên Cloud...', '#0284c7');
 
-    const syncUrl = `${SYNC_URL}?action=adminPushToken&token=${encodeURIComponent(cleanTok)}&adminKey=${encodeURIComponent(ADMIN_KEY)}&device=Tampermonkey&_t=${Date.now()}`;
+    const syncUrl = `${SYNC_URL}?action=adminPushToken&token=${encodeURIComponent(cleanTok)}&owner=${encodeURIComponent(owner)}&adminKey=${encodeURIComponent(ADMIN_KEY)}&device=Tampermonkey&_t=${Date.now()}`;
 
     const onSuccess = (data) => {
       const today = getTodayString();
+      try {
+        localStorage.setItem('ghn_last_sync_date', today);
+        localStorage.setItem('ghn_last_sync_token', cleanTok);
+      } catch (_) {}
       GM_setValue('last_sync_date', today);
       GM_setValue('last_sync_token', cleanTok);
-      tokenOwnerName = (data && data.tokenOwner) || tokenOwnerName;
+
+      tokenOwnerName = (data && data.tokenOwner) || owner;
       if (data && data.share !== undefined) isShareEnabled = data.share !== false;
       updateWidgetUI();
+
       if (isManual) {
-        showToast(`✓ <strong>Đã cập nhật Token sống lên Cloud!</strong>${tokenOwnerName ? '<br>Chủ: ' + tokenOwnerName : ''}`, '#10b981');
+        showToast(`✓ <strong>Đã cập nhật Token sống lên Cloud!</strong><br>Token: <code>${cleanTok.slice(0, 8)}...</code><br>Chủ: <strong>${tokenOwnerName}</strong>`, '#10b981', 5000);
       } else {
-        console.log(`[GHN Revert v4.3] Đã đồng bộ Token đầu ngày (${today}) lên Cloud.`);
+        console.log(`[GHN Revert v4.4] Đã đồng bộ Token đầu ngày (${today}) lên Cloud.`);
       }
     };
 
-    // Cách 1: Dùng fetch của trình duyệt (theo dõi redirect 302 mượt mà)
+    // Cách 1: Fetch trực tiếp từ pageWindow (theo dõi 302 redirect)
     const tryFetch = () => {
       const fetchFn = (typeof pageWindow !== 'undefined' && pageWindow.fetch) || window.fetch;
       if (typeof fetchFn !== 'function') return Promise.reject(new Error('Fetch unavailable'));
@@ -147,18 +293,29 @@
   // Kiểm tra và chỉ tự động đồng bộ 1 LẦN DUY NHẤT VÀO ĐẦU NGÀY
   function checkDailySync(token, isManual = false) {
     if (!isValidToken(token)) {
-      if (isManual) showToast('Chưa tìm thấy Token trên trang này. Hãy đăng nhập GHN.', '#ef4444');
+      if (isManual) showToast('Chưa tìm thấy Token trên trang này. Hãy đăng nhập GHN hoặc bấm F5 tải lại.', '#ef4444');
       return;
     }
 
     capturedToken = token;
     const today = getTodayString();
-    const lastSyncDate = GM_getValue('last_sync_date', '');
-    const lastSyncToken = GM_getValue('last_sync_token', '');
 
-    if (!isManual && lastSyncDate === today && lastSyncToken === token) {
+    let localSyncDate = '';
+    let localSyncToken = '';
+    try {
+      localSyncDate = localStorage.getItem('ghn_last_sync_date') || '';
+      localSyncToken = localStorage.getItem('ghn_last_sync_token') || '';
+    } catch (_) {}
+
+    const gmSyncDate = GM_getValue('last_sync_date', '');
+    const gmSyncToken = GM_getValue('last_sync_token', '');
+
+    const alreadySynced = (localSyncDate === today && localSyncToken === token) ||
+                          (gmSyncDate === today && gmSyncToken === token);
+
+    if (!isManual && alreadySynced) {
       // Hôm nay đã đồng bộ rồi -> KHÔNG GỌI GÌ HẾT ĐỂ BẢO VỆ TÀI KHOẢN GHN
-      console.log(`[GHN Revert v4.3] Token hôm nay (${today}) đã đồng bộ trước đó. Bỏ qua tự động.`);
+      console.log(`[GHN Revert v4.4] Token hôm nay (${today}) đã đồng bộ trước đó. Bỏ qua tự động.`);
       updateWidgetUI();
       return;
     }
@@ -260,30 +417,38 @@
 
   function updateWidgetUI() {
     if (!widgetEl) return;
-    const tok = capturedToken || extractTokenFromStorage();
+    const tok = capturedToken || scanAllStorageForToken();
     const hasToken = !!tok;
 
     const statusDot = widgetEl.querySelector('#ghn-widget-status-dot');
     const statusText = widgetEl.querySelector('#ghn-widget-status-text');
+    const tokenPreviewText = widgetEl.querySelector('#ghn-widget-token-preview');
     const syncInfoText = widgetEl.querySelector('#ghn-widget-sync-info');
     const shareBtn = widgetEl.querySelector('#ghn-widget-share-btn');
     const shareDesc = widgetEl.querySelector('#ghn-widget-share-desc');
 
     const today = getTodayString();
-    const lastSyncDate = GM_getValue('last_sync_date', '');
+    let localSyncDate = '';
+    try { localSyncDate = localStorage.getItem('ghn_last_sync_date') || ''; } catch (_) {}
+    const lastSyncDate = localSyncDate || GM_getValue('last_sync_date', '');
 
     if (hasToken) {
       if (statusDot) statusDot.style.background = '#10b981';
-      if (statusText) statusText.innerHTML = `Token: <strong>${tokenOwnerName || tok.slice(0, 8) + '...'}</strong>`;
+      if (statusText) statusText.innerHTML = `Chủ: <strong>${tokenOwnerName || detectUserName() || 'Quản lý GHN'}</strong>`;
+      if (tokenPreviewText) {
+        tokenPreviewText.innerHTML = `Token: <code style="color: #38bdf8; font-weight: 700;">${tok.slice(0, 8)}...${tok.slice(-4)}</code> (${tok.length} ký tự)`;
+      }
       if (syncInfoText) {
-        syncInfoText.textContent = lastSyncDate === today
+        const isSyncedToday = lastSyncDate === today;
+        syncInfoText.textContent = isSyncedToday
           ? `✓ Đã đồng bộ hôm nay (${today})`
-          : `Chưa đồng bộ hôm nay (Bấm 'Đẩy Token')`;
-        syncInfoText.style.color = lastSyncDate === today ? '#86efac' : '#fcd34d';
+          : `⚠️ Chưa đồng bộ hôm nay (Bấm 'Đẩy Token')`;
+        syncInfoText.style.color = isSyncedToday ? '#86efac' : '#fcd34d';
       }
     } else {
       if (statusDot) statusDot.style.background = '#ef4444';
-      if (statusText) statusText.innerHTML = `Chưa bắt được Token (Hãy đăng nhập)`;
+      if (statusText) statusText.innerHTML = `Chưa bắt được Token (Hãy đăng nhập hoặc F5)`;
+      if (tokenPreviewText) tokenPreviewText.innerHTML = `Token: <em>Chưa có</em>`;
       if (syncInfoText) syncInfoText.textContent = '';
     }
 
@@ -320,7 +485,7 @@
         padding: 14px 16px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
         border: 1px solid #334155;
-        width: 310px;
+        width: 320px;
         transition: all 0.25s ease;
       }
       .ghn-widget-header {
@@ -455,7 +620,7 @@
         <div class="ghn-widget-header">
           <div class="ghn-widget-title">
             <span>⚡ GHN Revert</span>
-            <span style="font-size: 10px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 10px;">Quản Trị</span>
+            <span style="font-size: 10px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 10px;">Quản Trị v4.4</span>
           </div>
           <button id="ghn-widget-min-btn" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 12px;" title="Thu gọn/Mở rộng">−</button>
         </div>
@@ -466,6 +631,7 @@
               <span id="ghn-widget-status-dot" class="ghn-status-dot"></span>
               <span id="ghn-widget-status-text">Đang kiểm tra...</span>
             </div>
+            <div id="ghn-widget-token-preview" style="font-size: 11px; margin-left: 17px; color: #cbd5e1;"></div>
             <div id="ghn-widget-sync-info" style="font-size: 11px; margin-left: 17px; color: #94a3b8;"></div>
           </div>
 
@@ -475,14 +641,17 @@
           <div id="ghn-widget-share-desc" class="ghn-share-desc">✓ Nhân viên được phép sử dụng (Bấm để Tắt)</div>
 
           <div class="ghn-widget-actions">
-            <button type="button" id="ghn-widget-push-btn" class="ghn-action-btn" title="Cập nhật Token thủ công khi cần">
+            <button type="button" id="ghn-widget-push-btn" class="ghn-action-btn" style="background: #0284c7; color: #ffffff; border-color: #0284c7;" title="Cập nhật Token thủ công ngay lập tức">
               <span>⚡ Đẩy Token</span>
+            </button>
+            <button type="button" id="ghn-widget-copy-btn" class="ghn-action-btn" title="Sao chép Token vào bộ nhớ tạm">
+              <span>📋 Copy Token</span>
             </button>
             <a href="${REVERT_WEB_URL}" target="_blank" class="ghn-action-btn" title="Mở trang web Revert Hub">
               <span>🌐 Revert Hub</span>
             </a>
-            <a href="${SHEET_URL}" target="_blank" class="ghn-action-btn" style="grid-column: span 2;" title="Mở Google Sheet xem nhật ký đổi kho">
-              <span>📊 Mở Sheet Nhật Ký Đổi Kho</span>
+            <a href="${SHEET_URL}" target="_blank" class="ghn-action-btn" title="Mở Google Sheet xem nhật ký đổi kho">
+              <span>📊 Sheet Nhật Ký</span>
             </a>
           </div>
         </div>
@@ -501,8 +670,25 @@
     const pushBtn = widgetEl.querySelector('#ghn-widget-push-btn');
     if (pushBtn) {
       pushBtn.addEventListener('click', () => {
-        const tok = extractTokenFromStorage();
-        checkDailySync(tok, true);
+        const tok = capturedToken || scanAllStorageForToken();
+        if (tok) {
+          pushTokenToCloud(tok, true);
+        } else {
+          showToast('Chưa tìm thấy Token trên trang này. Hãy đăng nhập GHN hoặc bấm F5 tải lại.', '#ef4444');
+        }
+      });
+    }
+
+    const copyBtn = widgetEl.querySelector('#ghn-widget-copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        const tok = capturedToken || scanAllStorageForToken();
+        if (tok) {
+          GM_setClipboard(tok);
+          showToast(`📋 Đã chép Token vào bộ nhớ tạm: <code>${tok.slice(0, 8)}...</code>`, '#10b981');
+        } else {
+          showToast('Chưa có Token để sao chép.', '#ef4444');
+        }
       });
     }
 
@@ -517,8 +703,9 @@
     }
 
     // Tự động kiểm tra Token đầu ngày (chỉ 1 lần duy nhất)
-    const tok = extractTokenFromStorage();
+    const tok = scanAllStorageForToken();
     if (tok) {
+      capturedToken = tok;
       checkDailySync(tok, false);
     }
     fetchCloudStatus();
