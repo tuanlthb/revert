@@ -38,12 +38,10 @@
       </div>
 
       <div class="header-actions">
-        <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" class="btn btn-outline btn-sm" title="Mở bảng Google Sheet xem nhật ký đổi kho trực tuyến">
+        <!-- Nhật ký Google Sheet chỉ dành cho Quản lý -->
+        <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" id="header-sheet-link" class="btn btn-outline btn-sm admin-only" style="display: none;" title="Mở bảng Google Sheet xem nhật ký đổi kho trực tuyến (Dành cho Quản lý)">
           <i class="fa-solid fa-table"></i> Nhật Ký Google Sheet
         </a>
-        <button type="button" id="btn-open-guide" class="btn btn-outline btn-sm" title="Hướng dẫn sử dụng và cài đặt">
-          <i class="fa-solid fa-circle-question"></i> Hướng Dẫn
-        </button>
         <div id="token-pill" class="token-status-pill">
           <span class="status-dot"></span>
           <span id="token-status-text">Đang kết nối...</span>
@@ -332,7 +330,7 @@
             </div>
             
             <div style="display: flex; gap: 8px;">
-              <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" class="btn btn-outline btn-sm" title="Mở Google Sheet xem toàn bộ nhật ký đổi kho">
+              <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" id="results-sheet-link" class="btn btn-outline btn-sm admin-only" style="display: none;" title="Mở Google Sheet xem toàn bộ nhật ký đổi kho (Dành cho Quản lý)">
                 <i class="fa-solid fa-table"></i> Xem Sheet Nhật Ký
               </a>
               <button id="btn-export-excel" class="btn btn-success btn-sm" style="display: none;">
@@ -804,10 +802,7 @@
       </div>
 
       <div class="login-footer">
-        <p><i class="fa-solid fa-shield"></i> Mọi thao tác đổi kho đều được tự động lưu vào Google Sheet nội bộ.</p>
-        <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" style="color: var(--primary); font-size: 12px; font-weight: 600; text-decoration: underline; display: inline-flex; align-items: center; gap: 5px; margin-top: 6px;">
-          <i class="fa-solid fa-table"></i> Xem Bảng Nhật Ký Đổi Kho Trực Tuyến
-        </a>
+        <p><i class="fa-solid fa-shield-halved"></i> Hệ thống phân quyền &amp; bảo mật nội bộ GHN Revert Hub</p>
       </div>
     </div>
   </div>
@@ -862,10 +857,13 @@
           </div>
         </div>
 
-        <div style="text-align: center; margin-top: 10px;">
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
           <a href="https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing" target="_blank" class="btn btn-outline btn-sm" style="width: 100%; justify-content: center;">
             <i class="fa-solid fa-table"></i> Mở Bảng Nhật Ký Đổi Kho &amp; Quản Lý Tài Khoản (Google Sheet)
           </a>
+          <button type="button" id="btn-admin-guide" class="btn btn-outline btn-sm" style="width: 100%; justify-content: center;">
+            <i class="fa-solid fa-circle-question"></i> Hướng Dẫn Cài Đặt Tampermonkey Bắt Token
+          </button>
         </div>
       </div>
 

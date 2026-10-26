@@ -448,7 +448,13 @@
       }
       if (els.userAvatarText) els.userAvatarText.textContent = name.trim().charAt(0).toUpperCase();
       if (els.loggedUserWrap) els.loggedUserWrap.style.display = 'flex';
-      if (els.btnOpenAdmin) els.btnOpenAdmin.style.display = state.authUser.role === 'admin' ? 'inline-flex' : 'none';
+      const isAdmin = state.authUser.role === 'admin';
+      if (els.btnOpenAdmin) els.btnOpenAdmin.style.display = isAdmin ? 'inline-flex' : 'none';
+
+      // Ẩn / Hiện các thành phần chỉ Quản lý mới được xem (Bảng Nhật Ký Google Sheet)
+      document.querySelectorAll('.admin-only').forEach(el => {
+        el.style.display = isAdmin ? 'inline-flex' : 'none';
+      });
     }
 
     // Connection status & warning banner
@@ -531,6 +537,7 @@
     localStorage.removeItem(SESSION_STORAGE_KEY);
     if (els.loggedUserWrap) els.loggedUserWrap.style.display = 'none';
     if (els.btnOpenAdmin) els.btnOpenAdmin.style.display = 'none';
+    document.querySelectorAll('.admin-only').forEach(el => { el.style.display = 'none'; });
     setConnectionStatus('disconnected', 'Chưa đăng nhập');
     showLoginScreen(message || 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
   }
@@ -609,6 +616,7 @@
     localStorage.removeItem(SESSION_STORAGE_KEY);
     if (els.loggedUserWrap) els.loggedUserWrap.style.display = 'none';
     if (els.btnOpenAdmin) els.btnOpenAdmin.style.display = 'none';
+    document.querySelectorAll('.admin-only').forEach(el => { el.style.display = 'none'; });
     setConnectionStatus('disconnected', 'Chưa đăng nhập');
     showLoginScreen('');
   }
@@ -2257,23 +2265,42 @@
     els.btnCancelConfirm.addEventListener('click', closeConfirmModal);
     els.btnExecuteConfirmed.addEventListener('click', executeBatchUpdate);
 
-    els.btnOpenGuide.addEventListener('click', () => {
-      els.modalGuide.classList.add('show');
-    });
-    els.btnCloseGuide.addEventListener('click', () => {
-      els.modalGuide.classList.remove('show');
-    });
-    els.btnGuideOk.addEventListener('click', () => {
-      els.modalGuide.classList.remove('show');
-    });
+    if (els.btnOpenGuide && els.modalGuide) {
+      els.btnOpenGuide.addEventListener('click', () => {
+        els.modalGuide.classList.add('show');
+      });
+    }
+
+    const btnAdminGuide = document.getElementById('btn-admin-guide');
+    if (btnAdminGuide && els.modalGuide) {
+      btnAdminGuide.addEventListener('click', () => {
+        els.modalGuide.classList.add('show');
+      });
+    }
+
+    if (els.btnCloseGuide && els.modalGuide) {
+      els.btnCloseGuide.addEventListener('click', () => {
+        els.modalGuide.classList.remove('show');
+      });
+    }
+
+    if (els.btnGuideOk && els.modalGuide) {
+      els.btnGuideOk.addEventListener('click', () => {
+        els.modalGuide.classList.remove('show');
+      });
+    }
 
     // Close modals on background click
-    els.modalConfirm.addEventListener('click', (e) => {
-      if (e.target === els.modalConfirm) closeConfirmModal();
-    });
-    els.modalGuide.addEventListener('click', (e) => {
-      if (e.target === els.modalGuide) els.modalGuide.classList.remove('show');
-    });
+    if (els.modalConfirm) {
+      els.modalConfirm.addEventListener('click', (e) => {
+        if (e.target === els.modalConfirm) closeConfirmModal();
+      });
+    }
+    if (els.modalGuide) {
+      els.modalGuide.addEventListener('click', (e) => {
+        if (e.target === els.modalGuide) els.modalGuide.classList.remove('show');
+      });
+    }
     if (els.modalAdmin) {
       els.modalAdmin.addEventListener('click', (e) => {
         if (e.target === els.modalAdmin) els.modalAdmin.classList.remove('show');

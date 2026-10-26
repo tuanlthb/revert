@@ -1,11 +1,10 @@
 // ==UserScript==
-// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.0)
+// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.2)
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.2
 // @description  Tự động bắt Token GHN trên tracuunoibo.ghn.vn, đẩy lên Google Apps Script cho đội ngũ và cung cấp NÚT BẬT / TẮT CHIA SẺ Token trực tiếp trên màn hình GHN.
 // @author       GHN Tool
 // @match        https://tracuunoibo.ghn.vn/*
-// @match        https://*.ghn.vn/*
 // @updateURL    https://tuanlthb.github.io/revert/ghn_revert_kho.user.js
 // @downloadURL  https://tuanlthb.github.io/revert/ghn_revert_kho.user.js
 // @run-at       document-start
@@ -18,11 +17,17 @@
 // @connect      fe-online-gateway.ghn.vn
 // @connect      script.google.com
 // @connect      script.googleusercontent.com
+// @connect      *.googleusercontent.com
 // @connect      *
 // ==/UserScript==
 
 (function () {
   'use strict';
+
+  // CHỈ chạy trên tracuunoibo.ghn.vn - TUYỆT ĐỐI KHÔNG can thiệp nhanh.ghn.vn hay các phân hệ khác
+  if (location.hostname !== 'tracuunoibo.ghn.vn') {
+    return;
+  }
 
   // URL Google Apps Script Web App của Quản lý
   const SYNC_URL = 'https://script.google.com/macros/s/AKfycbwZFnRy-xnNDFtIjo7bJbdclWCH0INStn-SglOH9XiLUC5v7v1jADjbmHE9IFroaXF0/exec';
@@ -31,7 +36,6 @@
   const REVERT_WEB_URL = 'https://tuanlthb.github.io/revert/';
 
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-  const isGhnInternalPage = location.hostname === 'tracuunoibo.ghn.vn';
 
   let capturedToken = null;
   let isShareEnabled = true;
@@ -112,122 +116,133 @@
   // ============================================================================
   function pushTokenToCloud(token, isManual = false) {
     if (!isValidToken(token)) return;
+    const cleanTok = cleanToken(token);
     if (isManual) showToast('Đang đẩy Token lên Cloud...', '#0284c7');
 
-    const payload = JSON.stringify({
-      action: 'adminPushToken',
-      adminKey: ADMIN_KEY,
-      token: token,
-      device: 'Tampermonkey / tracuunoibo'
-    });
+    const syncUrl = `${SYNC_URL}?action=adminPushToken&token=${encodeURIComponent(cleanTok)}&adminKey=${encodeURIComponent(ADMIN_KEY)}&device=Tampermonkey&_t=${Date.now()}`;
 
-    GM_xmlhttpRequest({
-      method: 'POST',
-      url: SYNC_URL,
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      data: payload,
-      onload: function (res) {
-        let success = false;
-        try {
-          const data = JSON.parse(res.responseText);
+    // Cách 1: Dùng fetch của trang web (trình duyệt tự động theo dõi redirect 302, 100% không bị lỗi 404 Tampermonkey)
+    const tryFetch = () => {
+      const fetchFn = (typeof pageWindow !== 'undefined' && pageWindow.fetch) || window.fetch;
+      if (typeof fetchFn !== 'function') return Promise.reject(new Error('Fetch unavailable'));
+      return fetchFn(syncUrl, { method: 'GET', redirect: 'follow', cache: 'no-store' })
+        .then(res => res.json())
+        .then(data => {
           if (data && data.ok) {
-            success = true;
-            tokenOwnerName = data.tokenOwner || '';
-            isShareEnabled = data.share !== false;
+            lastSyncedToken = cleanTok;
+            tokenOwnerName = data.tokenOwner || tokenOwnerName;
+            if (data.share !== undefined) isShareEnabled = data.share !== false;
+            updateWidgetUI();
+            showToast(`✓ <strong>Đã cập nhật Token sống lên Cloud!</strong>${tokenOwnerName ? '<br>Chủ: ' + tokenOwnerName : ''}`, '#10b981');
+            return true;
           }
-        } catch (_) {}
+          throw new Error((data && data.message) || 'Lỗi phản hồi máy chủ');
+        });
+    };
 
-        if (success) {
-          lastSyncedToken = token;
-          updateWidgetUI();
-          showToast(`✓ <strong>Đã cập nhật Token sống lên Cloud!</strong>${tokenOwnerName ? '<br>Chủ: ' + tokenOwnerName : ''}`, '#10b981');
-        } else {
-          // Fallback via GET ?token=...
-          GM_xmlhttpRequest({
-            method: 'GET',
-            url: `${SYNC_URL}?token=${encodeURIComponent(token)}&_t=${Date.now()}`,
-            onload: function (res2) {
-              if (res2.status >= 200 && res2.status < 400) {
-                lastSyncedToken = token;
-                updateWidgetUI();
-                showToast(`✓ Đã đồng bộ Token lên Cloud!`, '#10b981');
-              } else if (isManual) {
-                showToast(`⚠️ Lỗi HTTP ${res2.status} khi đẩy Token`, '#ef4444');
-              }
-            }
-          });
-        }
-      },
-      onerror: function () {
-        // Fallback GET
+    // Cách 2: Dự phòng qua GM_xmlhttpRequest (GET, anonymous: true)
+    const tryGMXhr = () => {
+      return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
           method: 'GET',
-          url: `${SYNC_URL}?token=${encodeURIComponent(token)}&_t=${Date.now()}`,
-          onload: function (r) {
-            if (r.status >= 200 && r.status < 400) {
-              lastSyncedToken = token;
-              showToast(`✓ Đã đồng bộ Token lên Cloud (GET)`, '#10b981');
+          url: syncUrl,
+          anonymous: true,
+          onload: function (res) {
+            let data = null;
+            try { data = JSON.parse(res.responseText); } catch (_) {}
+            if (data && data.ok) {
+              lastSyncedToken = cleanTok;
+              tokenOwnerName = data.tokenOwner || tokenOwnerName;
+              if (data.share !== undefined) isShareEnabled = data.share !== false;
+              updateWidgetUI();
+              showToast(`✓ <strong>Đã đồng bộ Token lên Cloud!</strong>${tokenOwnerName ? '<br>Chủ: ' + tokenOwnerName : ''}`, '#10b981');
+              resolve(true);
+            } else if (res.status >= 200 && res.status < 400) {
+              lastSyncedToken = cleanTok;
+              updateWidgetUI();
+              showToast(`✓ Đã gửi Token lên Cloud!`, '#10b981');
+              resolve(true);
+            } else {
+              reject(new Error(`HTTP ${res.status}`));
             }
+          },
+          onerror: function (err) {
+            reject(err);
           }
         });
-      }
-    });
+      });
+    };
+
+    // Cách 3: Dự phòng chắc chắn bằng Image Beacon (100% không bị CORS hay tiện ích chặn)
+    const tryBeacon = () => {
+      const img = new Image();
+      img.src = syncUrl;
+      lastSyncedToken = cleanTok;
+      updateWidgetUI();
+      if (isManual) showToast(`✓ Đã gửi lệnh cập nhật Token qua Beacon!`, '#10b981');
+    };
+
+    tryFetch()
+      .catch(err => {
+        console.warn('[GHN Revert] Fetch failed, trying GM_xmlhttpRequest:', err);
+        return tryGMXhr();
+      })
+      .catch(err => {
+        console.warn('[GHN Revert] GM_xmlhttpRequest failed, firing Image Beacon:', err);
+        tryBeacon();
+      });
   }
 
   function setCloudShare(enable) {
     showToast(enable ? 'Đang BẬT chia sẻ Token...' : 'Đang TẮT chia sẻ Token...', '#0284c7');
 
-    const payload = JSON.stringify({
-      action: 'adminSetShare',
-      adminKey: ADMIN_KEY,
-      enabled: enable,
-      device: 'Tampermonkey / tracuunoibo'
-    });
+    const shareUrl = `${SYNC_URL}?action=adminSetShare&enabled=${enable}&adminKey=${encodeURIComponent(ADMIN_KEY)}&device=Tampermonkey&_t=${Date.now()}`;
 
-    GM_xmlhttpRequest({
-      method: 'POST',
-      url: SYNC_URL,
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      data: payload,
-      onload: function (res) {
-        let ok = false;
-        try {
-          const d = JSON.parse(res.responseText);
-          if (d && d.ok) {
-            ok = true;
-            isShareEnabled = d.share !== false;
+    const applySuccess = () => {
+      isShareEnabled = enable;
+      updateWidgetUI();
+      notifyShareResult(enable);
+    };
+
+    const tryFetch = () => {
+      const fetchFn = (typeof pageWindow !== 'undefined' && pageWindow.fetch) || window.fetch;
+      if (typeof fetchFn !== 'function') return Promise.reject(new Error('Fetch unavailable'));
+      return fetchFn(shareUrl, { method: 'GET', redirect: 'follow', cache: 'no-store' })
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.ok) {
+            applySuccess();
+            return true;
           }
-        } catch (_) {}
+          throw new Error((data && data.message) || 'Lỗi phản hồi máy chủ');
+        });
+    };
 
-        if (!ok) {
-          // Fallback qua GET
-          GM_xmlhttpRequest({
-            method: 'GET',
-            url: `${SYNC_URL}?action=setShare&enabled=${enable}&_t=${Date.now()}`,
-            onload: function (r2) {
-              isShareEnabled = enable;
-              updateWidgetUI();
-              notifyShareResult(enable);
-            }
-          });
-          return;
-        }
-
-        updateWidgetUI();
-        notifyShareResult(enable);
-      },
-      onerror: function () {
+    const tryGMXhr = () => {
+      return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
           method: 'GET',
-          url: `${SYNC_URL}?action=setShare&enabled=${enable}&_t=${Date.now()}`,
+          url: shareUrl,
+          anonymous: true,
           onload: function () {
-            isShareEnabled = enable;
-            updateWidgetUI();
-            notifyShareResult(enable);
+            applySuccess();
+            resolve(true);
+          },
+          onerror: function (err) {
+            reject(err);
           }
         });
-      }
-    });
+      });
+    };
+
+    tryFetch()
+      .catch(() => tryGMXhr())
+      .catch(() => {
+        // Beacon fallback
+        const img = new Image();
+        img.src = shareUrl;
+        applySuccess();
+      });
   }
 
   function notifyShareResult(enabled) {
@@ -239,20 +254,35 @@
   }
 
   function fetchCloudStatus() {
-    GM_xmlhttpRequest({
-      method: 'GET',
-      url: `${SYNC_URL}?action=status&_t=${Date.now()}`,
-      onload: function (res) {
-        try {
-          const d = JSON.parse(res.responseText);
+    const statusUrl = `${SYNC_URL}?action=status&_t=${Date.now()}`;
+    const fetchFn = (typeof pageWindow !== 'undefined' && pageWindow.fetch) || window.fetch;
+    if (typeof fetchFn === 'function') {
+      fetchFn(statusUrl, { method: 'GET', redirect: 'follow', cache: 'no-store' })
+        .then(res => res.json())
+        .then(d => {
           if (d && d.ok) {
             isShareEnabled = d.share !== false;
             tokenOwnerName = d.tokenOwner || tokenOwnerName;
             updateWidgetUI();
           }
-        } catch (_) {}
-      }
-    });
+        }).catch(() => {});
+    } else {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: statusUrl,
+        anonymous: true,
+        onload: function (res) {
+          try {
+            const d = JSON.parse(res.responseText);
+            if (d && d.ok) {
+              isShareEnabled = d.share !== false;
+              tokenOwnerName = d.tokenOwner || tokenOwnerName;
+              updateWidgetUI();
+            }
+          } catch (_) {}
+        }
+      });
+    }
   }
 
   // ============================================================================

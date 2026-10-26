@@ -1753,3 +1753,9 @@ body.auth-locked {
   margin-left: 6px;
 }
 
+/* Các thành phần bảo mật chỉ hiển thị cho Quản lý */
+.admin-only {
+  display: none;
+}
+
+
