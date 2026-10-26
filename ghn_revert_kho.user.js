@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.4)
+// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.5)
 // @namespace    http://tampermonkey.net/
-// @version      4.4
-// @description  Bắt Token GHN trên tracuunoibo.ghn.vn (Đồng bộ 1 lần duy nhất đầu ngày hoặc khi bấm nút, không chạy ngầm liên tục). Cung cấp NÚT BẬT / TẮT CHIA SẺ Token trực tiếp trên màn hình GHN.
+// @version      4.5
+// @description  Bắt và XÁC THỰC Token GHN sống trên tracuunoibo.ghn.vn (tự động kiểm tra trực tiếp với GHN trước khi đẩy, loại bỏ 100% token chết/hết hạn). Cung cấp nút BẬT / TẮT CHIA SẺ Token trực tiếp trên màn hình GHN.
 // @author       GHN Tool
 // @match        https://tracuunoibo.ghn.vn/*
 // @noframes
@@ -35,19 +35,22 @@
   const ADMIN_KEY = 'ghn_revert_secret_2026';
   const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1myvJs5M404MNhQeTxtzijlwEnNr7JIUT3itEVYrr6FM/edit?usp=sharing';
   const REVERT_WEB_URL = 'https://tuanlthb.github.io/revert/';
+  const API_USER_INFO = 'https://fe-online-gateway.ghn.vn/order-tracking/public-api/internal/user-info';
 
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
   let capturedToken = null;
   let isShareEnabled = true;
   let tokenOwnerName = '';
+  let tokenValidationState = 'pending'; // 'valid' | 'invalid' | 'pending' | 'checking'
+  let tokenStatusDetail = 'Đang kiểm tra...';
 
   function cleanToken(tok) {
     if (!tok || typeof tok !== 'string') return '';
     return tok.trim().replace(/^["']+|["']+$/g, '');
   }
 
-  function isValidToken(tok) {
+  function isValidTokenFormat(tok) {
     const c = cleanToken(tok);
     return c.length >= 20 && c !== 'null' && c !== 'undefined';
   }
@@ -58,22 +61,84 @@
   }
 
   // ============================================================================
-  // PASSIVE TOKEN SNIFFER (Zero network requests, Zero loop, 100% an toàn)
+  // XÁC THỰC TRỰC TIẾP TOKEN VỚI GHN (Kiểm tra token thực sự còn sống hay đã hết hạn)
   // ============================================================================
-  // Bắt Token khi trang tracuunoibo.ghn.vn tự động gửi request API của hệ thống
-  function registerCapturedToken(tok, source = 'Auto') {
+  async function verifyGhnToken(tok) {
+    if (!isValidTokenFormat(tok)) return { valid: false, message: 'Định dạng token không đúng' };
     const clean = cleanToken(tok);
-    if (!isValidToken(clean)) return;
 
-    if (capturedToken !== clean) {
+    try {
+      const fetchFn = (typeof pageWindow !== 'undefined' && pageWindow.fetch) || window.fetch;
+      const res = await fetchFn(API_USER_INFO, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'token': clean
+        }
+      });
+
+      if (res.status === 200) {
+        const data = await res.json();
+        if (data && data.code === 200 && data.data) {
+          const owner = data.data.full_name || data.data.name || 'Quản lý GHN';
+          const empId = data.data.employee_id || data.data.id || '';
+          return {
+            valid: true,
+            token: clean,
+            owner: owner,
+            empId: empId,
+            message: `Hợp lệ (${owner})`
+          };
+        }
+      }
+
+      if (res.status === 401) {
+        return { valid: false, token: clean, message: 'Token đã hết hạn phiên làm việc (401)' };
+      }
+
+      return { valid: false, token: clean, message: `GHN trả về HTTP ${res.status}` };
+    } catch (err) {
+      console.warn('[GHN Revert] Kiểm tra token qua mạng gặp lỗi:', err);
+      return { valid: false, token: clean, message: 'Lỗi mạng khi kiểm tra' };
+    }
+  }
+
+  // ============================================================================
+  // PASSIVE TOKEN SNIFFER (Zero network overhead, an toàn 100% cho tài khoản GHN)
+  // ============================================================================
+  async function registerCandidateToken(tok, source = 'Auto') {
+    const clean = cleanToken(tok);
+    if (!isValidTokenFormat(clean)) return;
+
+    // Nếu đã là token hiện tại và đã xác thực hợp lệ thì bỏ qua
+    if (capturedToken === clean && tokenValidationState === 'valid') return;
+
+    console.log(`[GHN Revert v4.5] Bắt được ứng viên Token từ ${source}: ${clean.slice(0, 8)}... Đang xác thực với GHN...`);
+
+    const check = await verifyGhnToken(clean);
+    if (check.valid) {
       capturedToken = clean;
+      tokenOwnerName = check.owner;
+      tokenValidationState = 'valid';
+      tokenStatusDetail = `Sống (${check.owner})`;
+
       try {
-        localStorage.setItem('ghn_active_token', clean);
+        localStorage.setItem('ghn_valid_token', clean);
+        localStorage.setItem('ghn_valid_owner', check.owner);
       } catch (_) {}
-      console.log(`[GHN Revert v4.4] Đã bắt được Token từ ${source}: ${clean.slice(0, 8)}...`);
+
+      console.log(`[GHN Revert v4.5] ✓ Token XÁC THỰC THÀNH CÔNG: ${clean.slice(0, 8)}... (${check.owner})`);
       updateWidgetUI();
-      // Tự động kiểm tra đồng bộ đầu ngày (nếu hôm nay chưa đồng bộ)
+      // Tự động kiểm tra đồng bộ đầu ngày
       checkDailySync(clean, false);
+    } else {
+      console.warn(`[GHN Revert v4.5] ✗ Token từ ${source} KHÔNG HỢP LỆ (${check.message}): ${clean.slice(0, 8)}...`);
+      // Nếu chính là token đang dùng mà hết hạn
+      if (capturedToken === clean || !capturedToken) {
+        tokenValidationState = 'invalid';
+        tokenStatusDetail = check.message;
+        updateWidgetUI();
+      }
     }
   }
 
@@ -82,8 +147,8 @@
     const origSetHeader = pageWindow.XMLHttpRequest.prototype.setRequestHeader;
     pageWindow.XMLHttpRequest.prototype.setRequestHeader = function (key, value) {
       try {
-        if (String(key || '').toLowerCase() === 'token' && isValidToken(value)) {
-          registerCapturedToken(String(value), 'XHR Header');
+        if (String(key || '').toLowerCase() === 'token' && isValidTokenFormat(value)) {
+          registerCandidateToken(String(value), 'XHR Header');
         }
       } catch (_) {}
       return origSetHeader.apply(this, arguments);
@@ -102,8 +167,8 @@
           } else if (typeof init.headers === 'object') {
             tok = init.headers['token'] || init.headers['Token'];
           }
-          if (isValidToken(tok)) {
-            registerCapturedToken(tok, 'Fetch Header');
+          if (isValidTokenFormat(tok)) {
+            registerCandidateToken(tok, 'Fetch Header');
           }
         }
       } catch (_) {}
@@ -112,57 +177,50 @@
   } catch (_) {}
 
   // ============================================================================
-  // DEEP STORAGE SCAN FOR TOKEN
+  // THU THẬP TẤT CẢ ỨNG VIÊN TOKEN TỪ BỘ NHỚ VÀ XÁC THỰC TỪNG CÁI
   // ============================================================================
-  function scanAllStorageForToken() {
-    if (isValidToken(capturedToken)) return capturedToken;
-
-    // Kiểm tra token vừa lưu trong phiên làm việc
-    try {
-      const active = localStorage.getItem('ghn_active_token');
-      if (isValidToken(active)) return cleanToken(active);
-    } catch (_) {}
-
+  function collectCandidateTokens() {
+    const set = new Set();
     const isCandidate = (v) => {
       if (!v || typeof v !== 'string') return false;
       const clean = v.trim().replace(/^["']+|["']+$/g, '');
-      // Format UUID 36 ký tự (chuẩn Token GHN nội bộ) hoặc JWT
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) {
-        return clean;
-      }
-      if (/^eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(clean)) {
-        return clean;
-      }
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) return clean;
+      if (/^eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+$/.test(clean)) return clean;
       return false;
     };
 
-    // 1. Quét các key thông dụng
+    if (capturedToken) set.add(capturedToken);
+
+    // 1. Key token hợp lệ vừa lưu
+    try {
+      const v = localStorage.getItem('ghn_valid_token');
+      if (isCandidate(v)) set.add(cleanToken(v));
+    } catch (_) {}
+
+    // 2. Key thông dụng
     const commonKeys = ['token', 'accessToken', 'access_token', 'TOKEN', 'ACCESS_TOKEN', 'auth_token', 'jwt', 'ghn_token'];
     for (const k of commonKeys) {
       try {
         const v1 = localStorage.getItem(k);
-        const c1 = isCandidate(v1);
-        if (c1) return c1;
+        if (isCandidate(v1)) set.add(cleanToken(v1));
         const v2 = sessionStorage.getItem(k);
-        const c2 = isCandidate(v2);
-        if (c2) return c2;
+        if (isCandidate(v2)) set.add(cleanToken(v2));
       } catch (_) {}
     }
 
-    // 2. Quét toàn bộ localStorage
+    // 3. Quét toàn bộ localStorage
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         const v = localStorage.getItem(k);
-        const c = isCandidate(v);
-        if (c) return c;
+        if (isCandidate(v)) set.add(cleanToken(v));
         if (v && (v.startsWith('{') || v.startsWith('["'))) {
           try {
             const parsed = JSON.parse(v);
             if (parsed && typeof parsed === 'object') {
               for (const subKey of ['token', 'accessToken', 'access_token', 'jwt']) {
                 if (parsed[subKey] && isCandidate(parsed[subKey])) {
-                  return cleanToken(parsed[subKey]);
+                  set.add(cleanToken(parsed[subKey]));
                 }
               }
             }
@@ -171,48 +229,81 @@
       }
     } catch (_) {}
 
-    // 3. Quét cookie
+    // 4. Quét cookie
     try {
       const cookies = document.cookie.split(';');
       for (const cookie of cookies) {
         const parts = cookie.trim().split('=');
         if (parts.length >= 2) {
           const val = parts.slice(1).join('=');
-          const c = isCandidate(val);
-          if (c) return c;
+          if (isCandidate(val)) set.add(cleanToken(val));
         }
       }
     } catch (_) {}
 
-    return null;
+    return Array.from(set);
   }
 
-  // Tìm tên người dùng đang đăng nhập trên trang GHN
-  function detectUserName() {
-    try {
-      const userEl = document.querySelector('.user-name, .username, .user-info, .profile-name, .user-profile');
-      if (userEl && userEl.textContent.trim()) {
-        return userEl.textContent.trim();
+  // Quét và tìm Token còn sống đầu tiên
+  async function findAndVerifyLiveToken() {
+    tokenValidationState = 'checking';
+    tokenStatusDetail = 'Đang kiểm tra token với GHN...';
+    updateWidgetUI();
+
+    const candidates = collectCandidateTokens();
+    console.log(`[GHN Revert v4.5] Tìm thấy ${candidates.length} ứng viên Token trong bộ nhớ:`, candidates.map(t => t.slice(0, 8) + '...'));
+
+    for (const tok of candidates) {
+      const check = await verifyGhnToken(tok);
+      if (check.valid) {
+        capturedToken = tok;
+        tokenOwnerName = check.owner;
+        tokenValidationState = 'valid';
+        tokenStatusDetail = `Sống (${check.owner})`;
+
+        try {
+          localStorage.setItem('ghn_valid_token', tok);
+          localStorage.setItem('ghn_valid_owner', check.owner);
+        } catch (_) {}
+
+        updateWidgetUI();
+        return check;
       }
-      const rawUser = localStorage.getItem('user') || localStorage.getItem('userInfo');
-      if (rawUser) {
-        const u = JSON.parse(rawUser);
-        if (u.name || u.full_name || u.username) {
-          return u.name || u.full_name || u.username;
-        }
-      }
-    } catch (_) {}
-    return '';
+    }
+
+    // Nếu không có token nào còn sống
+    tokenValidationState = 'invalid';
+    tokenStatusDetail = candidates.length > 0
+      ? 'Token trong máy đã hết hạn. Hãy đăng nhập lại GHN.'
+      : 'Chưa tìm thấy Token. Hãy đăng nhập GHN.';
+    updateWidgetUI();
+    return { valid: false };
   }
 
   // ============================================================================
-  // CLOUD SYNC ACTIONS (Chỉ chạy 1 lần đầu ngày hoặc khi người dùng bấm nút)
+  // CLOUD SYNC ACTIONS (Chỉ đẩy khi Token THỰC SỰ HỢP LỆ)
   // ============================================================================
-  function pushTokenToCloud(token, isManual = false) {
-    if (!isValidToken(token)) return;
-    const cleanTok = cleanToken(token);
-    const owner = tokenOwnerName || detectUserName() || 'Quản lý GHN';
-    if (isManual) showToast('Đang đẩy Token lên Cloud...', '#0284c7');
+  async function pushTokenToCloud(token, isManual = false) {
+    if (isManual) showToast('Đang kiểm tra & đẩy Token lên Cloud...', '#0284c7');
+
+    // Luôn kiểm tra tính hợp lệ trước khi đẩy!
+    const check = await verifyGhnToken(token);
+    if (!check.valid) {
+      tokenValidationState = 'invalid';
+      tokenStatusDetail = check.message;
+      updateWidgetUI();
+      if (isManual) {
+        showToast(`❌ <strong>Token không hợp lệ trên GHN (${check.message})!</strong><br>Vui lòng đăng xuất và đăng nhập lại vào trang GHN này.`, '#ef4444', 6000);
+      }
+      return;
+    }
+
+    const cleanTok = check.token;
+    const owner = check.owner || tokenOwnerName || 'Quản lý GHN';
+    capturedToken = cleanTok;
+    tokenOwnerName = owner;
+    tokenValidationState = 'valid';
+    tokenStatusDetail = `Sống (${owner})`;
 
     const syncUrl = `${SYNC_URL}?action=adminPushToken&token=${encodeURIComponent(cleanTok)}&owner=${encodeURIComponent(owner)}&adminKey=${encodeURIComponent(ADMIN_KEY)}&device=Tampermonkey&_t=${Date.now()}`;
 
@@ -230,13 +321,13 @@
       updateWidgetUI();
 
       if (isManual) {
-        showToast(`✓ <strong>Đã cập nhật Token sống lên Cloud!</strong><br>Token: <code>${cleanTok.slice(0, 8)}...</code><br>Chủ: <strong>${tokenOwnerName}</strong>`, '#10b981', 5000);
+        showToast(`✓ <strong>ĐÃ CẬP NHẬT TOKEN SỐNG LÊN CLOUD!</strong><br>Token: <code>${cleanTok.slice(0, 8)}...${cleanTok.slice(-4)}</code><br>Chủ: <strong>${tokenOwnerName}</strong>`, '#10b981', 5000);
       } else {
-        console.log(`[GHN Revert v4.4] Đã đồng bộ Token đầu ngày (${today}) lên Cloud.`);
+        console.log(`[GHN Revert v4.5] Đã đồng bộ Token sống đầu ngày (${today}) lên Cloud.`);
       }
     };
 
-    // Cách 1: Fetch trực tiếp từ pageWindow (theo dõi 302 redirect)
+    // Gửi bằng fetch hoặc GM_xmlhttpRequest
     const tryFetch = () => {
       const fetchFn = (typeof pageWindow !== 'undefined' && pageWindow.fetch) || window.fetch;
       if (typeof fetchFn !== 'function') return Promise.reject(new Error('Fetch unavailable'));
@@ -251,7 +342,6 @@
         });
     };
 
-    // Cách 2: Dự phòng qua GM_xmlhttpRequest
     const tryGMXhr = () => {
       return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -278,28 +368,22 @@
       });
     };
 
-    // Cách 3: Dự phòng Image Beacon
-    const tryBeacon = () => {
-      const img = new Image();
-      img.src = syncUrl;
-      onSuccess({ ok: true });
-    };
-
     tryFetch()
       .catch(() => tryGMXhr())
-      .catch(() => tryBeacon());
+      .catch(() => {
+        const img = new Image();
+        img.src = syncUrl;
+        onSuccess({ ok: true });
+      });
   }
 
-  // Kiểm tra và chỉ tự động đồng bộ 1 LẦN DUY NHẤT VÀO ĐẦU NGÀY
   function checkDailySync(token, isManual = false) {
-    if (!isValidToken(token)) {
+    if (!isValidTokenFormat(token)) {
       if (isManual) showToast('Chưa tìm thấy Token trên trang này. Hãy đăng nhập GHN hoặc bấm F5 tải lại.', '#ef4444');
       return;
     }
 
-    capturedToken = token;
     const today = getTodayString();
-
     let localSyncDate = '';
     let localSyncToken = '';
     try {
@@ -313,9 +397,8 @@
     const alreadySynced = (localSyncDate === today && localSyncToken === token) ||
                           (gmSyncDate === today && gmSyncToken === token);
 
-    if (!isManual && alreadySynced) {
-      // Hôm nay đã đồng bộ rồi -> KHÔNG GỌI GÌ HẾT ĐỂ BẢO VỆ TÀI KHOẢN GHN
-      console.log(`[GHN Revert v4.4] Token hôm nay (${today}) đã đồng bộ trước đó. Bỏ qua tự động.`);
+    if (!isManual && alreadySynced && tokenValidationState === 'valid') {
+      console.log(`[GHN Revert v4.5] Token sống hôm nay (${today}) đã đồng bộ trước đó. Bỏ qua tự động.`);
       updateWidgetUI();
       return;
     }
@@ -348,25 +431,7 @@
         });
     };
 
-    const tryGMXhr = () => {
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url: shareUrl,
-          anonymous: true,
-          onload: function () {
-            applySuccess();
-            resolve(true);
-          },
-          onerror: function (err) {
-            reject(err);
-          }
-        });
-      });
-    };
-
     tryFetch()
-      .catch(() => tryGMXhr())
       .catch(() => {
         const img = new Image();
         img.src = shareUrl;
@@ -417,8 +482,7 @@
 
   function updateWidgetUI() {
     if (!widgetEl) return;
-    const tok = capturedToken || scanAllStorageForToken();
-    const hasToken = !!tok;
+    const hasToken = isValidTokenFormat(capturedToken);
 
     const statusDot = widgetEl.querySelector('#ghn-widget-status-dot');
     const statusText = widgetEl.querySelector('#ghn-widget-status-text');
@@ -432,11 +496,11 @@
     try { localSyncDate = localStorage.getItem('ghn_last_sync_date') || ''; } catch (_) {}
     const lastSyncDate = localSyncDate || GM_getValue('last_sync_date', '');
 
-    if (hasToken) {
+    if (tokenValidationState === 'valid' && hasToken) {
       if (statusDot) statusDot.style.background = '#10b981';
-      if (statusText) statusText.innerHTML = `Chủ: <strong>${tokenOwnerName || detectUserName() || 'Quản lý GHN'}</strong>`;
+      if (statusText) statusText.innerHTML = `🟢 <strong>${tokenOwnerName || 'Quản lý GHN'}</strong> (Token sống)`;
       if (tokenPreviewText) {
-        tokenPreviewText.innerHTML = `Token: <code style="color: #38bdf8; font-weight: 700;">${tok.slice(0, 8)}...${tok.slice(-4)}</code> (${tok.length} ký tự)`;
+        tokenPreviewText.innerHTML = `Token: <code style="color: #38bdf8; font-weight: 700;">${capturedToken.slice(0, 8)}...${capturedToken.slice(-4)}</code> (${capturedToken.length} ký tự)`;
       }
       if (syncInfoText) {
         const isSyncedToday = lastSyncDate === today;
@@ -445,11 +509,23 @@
           : `⚠️ Chưa đồng bộ hôm nay (Bấm 'Đẩy Token')`;
         syncInfoText.style.color = isSyncedToday ? '#86efac' : '#fcd34d';
       }
-    } else {
-      if (statusDot) statusDot.style.background = '#ef4444';
-      if (statusText) statusText.innerHTML = `Chưa bắt được Token (Hãy đăng nhập hoặc F5)`;
-      if (tokenPreviewText) tokenPreviewText.innerHTML = `Token: <em>Chưa có</em>`;
+    } else if (tokenValidationState === 'checking') {
+      if (statusDot) statusDot.style.background = '#f59e0b';
+      if (statusText) statusText.innerHTML = `🟡 Đang kiểm tra token với GHN...`;
+      if (tokenPreviewText) tokenPreviewText.innerHTML = `Vui lòng đợi vài giây...`;
       if (syncInfoText) syncInfoText.textContent = '';
+    } else {
+      // Invalid hoặc No token
+      if (statusDot) statusDot.style.background = '#ef4444';
+      if (statusText) statusText.innerHTML = `🔴 <strong>Token không hợp lệ / Hết hạn</strong>`;
+      if (tokenPreviewText) {
+        tokenPreviewText.innerHTML = hasToken
+          ? `Token cũ: <code style="color: #f87171;">${capturedToken.slice(0, 8)}...</code> (401 Hết hạn)`
+          : `Chưa tìm thấy Token trong phiên đăng nhập`;
+      }
+      if (syncInfoText) {
+        syncInfoText.innerHTML = `<span style="color: #f87171;">👉 Hãy đăng xuất &amp; đăng nhập lại GHN</span>`;
+      }
     }
 
     if (shareBtn) {
@@ -620,7 +696,7 @@
         <div class="ghn-widget-header">
           <div class="ghn-widget-title">
             <span>⚡ GHN Revert</span>
-            <span style="font-size: 10px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 10px;">Quản Trị v4.4</span>
+            <span style="font-size: 10px; background: #334155; color: #cbd5e1; padding: 2px 6px; border-radius: 10px;">Quản Trị v4.5</span>
           </div>
           <button id="ghn-widget-min-btn" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 12px;" title="Thu gọn/Mở rộng">−</button>
         </div>
@@ -641,7 +717,7 @@
           <div id="ghn-widget-share-desc" class="ghn-share-desc">✓ Nhân viên được phép sử dụng (Bấm để Tắt)</div>
 
           <div class="ghn-widget-actions">
-            <button type="button" id="ghn-widget-push-btn" class="ghn-action-btn" style="background: #0284c7; color: #ffffff; border-color: #0284c7;" title="Cập nhật Token thủ công ngay lập tức">
+            <button type="button" id="ghn-widget-push-btn" class="ghn-action-btn" style="background: #0284c7; color: #ffffff; border-color: #0284c7;" title="Xác thực & Đẩy Token sống lên Cloud">
               <span>⚡ Đẩy Token</span>
             </button>
             <button type="button" id="ghn-widget-copy-btn" class="ghn-action-btn" title="Sao chép Token vào bộ nhớ tạm">
@@ -669,12 +745,12 @@
 
     const pushBtn = widgetEl.querySelector('#ghn-widget-push-btn');
     if (pushBtn) {
-      pushBtn.addEventListener('click', () => {
-        const tok = capturedToken || scanAllStorageForToken();
-        if (tok) {
-          pushTokenToCloud(tok, true);
+      pushBtn.addEventListener('click', async () => {
+        const live = await findAndVerifyLiveToken();
+        if (live.valid) {
+          pushTokenToCloud(live.token, true);
         } else {
-          showToast('Chưa tìm thấy Token trên trang này. Hãy đăng nhập GHN hoặc bấm F5 tải lại.', '#ef4444');
+          showToast(`❌ <strong>Không tìm thấy Token GHN hợp lệ!</strong><br>Vui lòng đăng xuất và đăng nhập lại vào trang tracuunoibo.ghn.vn này để cấp Token mới.`, '#ef4444', 6000);
         }
       });
     }
@@ -682,12 +758,11 @@
     const copyBtn = widgetEl.querySelector('#ghn-widget-copy-btn');
     if (copyBtn) {
       copyBtn.addEventListener('click', () => {
-        const tok = capturedToken || scanAllStorageForToken();
-        if (tok) {
-          GM_setClipboard(tok);
-          showToast(`📋 Đã chép Token vào bộ nhớ tạm: <code>${tok.slice(0, 8)}...</code>`, '#10b981');
+        if (capturedToken && tokenValidationState === 'valid') {
+          GM_setClipboard(capturedToken);
+          showToast(`📋 Đã chép Token sống vào bộ nhớ tạm: <code>${capturedToken.slice(0, 8)}...</code>`, '#10b981');
         } else {
-          showToast('Chưa có Token để sao chép.', '#ef4444');
+          showToast('Chưa có Token hợp lệ để sao chép. Hãy đăng nhập lại GHN.', '#ef4444');
         }
       });
     }
@@ -702,12 +777,13 @@
       });
     }
 
-    // Tự động kiểm tra Token đầu ngày (chỉ 1 lần duy nhất)
-    const tok = scanAllStorageForToken();
-    if (tok) {
-      capturedToken = tok;
-      checkDailySync(tok, false);
-    }
+    // Tự động quét và xác thực Token khi trang mở
+    findAndVerifyLiveToken().then(live => {
+      if (live.valid) {
+        checkDailySync(live.token, false);
+      }
+    });
+
     fetchCloudStatus();
   }
 

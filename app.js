@@ -424,6 +424,30 @@
     setConnectionStatus(s, text);
   }
 
+  async function verifyGhnTokenDirect(tok) {
+    if (!tok || tok.length < 20) return { valid: false, message: 'Chưa có Token hợp lệ' };
+    try {
+      const res = await fetch(API_USER_INFO, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'token': tok
+        }
+      });
+      if (res.status === 200) {
+        const d = await res.json();
+        if (d && d.code === 200 && d.data) {
+          return { valid: true, data: d.data, name: d.data.full_name || d.data.name || 'Quản lý GHN' };
+        }
+      }
+      if (res.status === 401) {
+        return { valid: false, message: 'Token đã hết hạn phiên làm việc trên GHN (401)' };
+      }
+      return { valid: false, message: `GHN trả về HTTP ${res.status}` };
+    } catch (_) {}
+    return { valid: false, message: 'Không thể kết nối máy chủ GHN' };
+  }
+
   function applyGatewayStatus(st) {
     state.authUser = st.user || state.authUser;
     if (st.token) {
@@ -464,9 +488,27 @@
 
     // Connection status & warning banner
     if (st.canUse) {
-      const timeStr = st.tokenUpdatedAt ? ` (Cập nhật ${new Date(st.tokenUpdatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })})` : '';
-      setConnectionStatus('ready', `Đã kết nối Token (${st.tokenOwner || 'Quản lý'}${timeStr})`);
-      if (els.gatewayBanner) els.gatewayBanner.style.display = 'none';
+      if (state.token) {
+        verifyGhnTokenDirect(state.token).then(check => {
+          if (!check.valid) {
+            state.isTokenValid = false;
+            setConnectionStatus('disconnected', 'Token Quản lý đã hết hạn (401)');
+            if (els.gatewayBannerText) {
+              els.gatewayBannerText.innerHTML = `⚠️ <strong>Token GHN của Quản lý đã hết hạn!</strong> Quản lý cần mở trang <a href="https://tracuunoibo.ghn.vn/internal/revert" target="_blank" style="color: #ea580c; text-decoration: underline; font-weight: 700;">tracuunoibo.ghn.vn</a> (đăng nhập lại nếu cần) và bấm nút <strong>'⚡ Đẩy Token'</strong> để cấp mới cho toàn đội.`;
+            }
+            if (els.gatewayBanner) els.gatewayBanner.style.display = 'flex';
+          } else {
+            state.isTokenValid = true;
+            const owner = check.name || st.tokenOwner || 'Quản lý';
+            const timeStr = st.tokenUpdatedAt ? ` (Cập nhật ${new Date(st.tokenUpdatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })})` : '';
+            setConnectionStatus('ready', `Đã kết nối Token (${owner}${timeStr})`);
+            if (els.gatewayBanner) els.gatewayBanner.style.display = 'none';
+          }
+        });
+      } else {
+        setConnectionStatus('ready', 'Đã kết nối Token GHN (Sẵn sàng)');
+        if (els.gatewayBanner) els.gatewayBanner.style.display = 'none';
+      }
       if (els.hubShareBadge) els.hubShareBadge.style.display = 'none';
     } else {
       const isLocked = st.share === false && st.tokenAlive;
@@ -709,15 +751,25 @@
 
   async function handleAdminPushToken() {
     const tok = els.adminTokenInput.value.trim();
-    if (!tok) {
-      showToast('Vui lòng dán Token mới vào ô.', 'error');
+    if (!tok || tok.length < 20) {
+      showToast('Vui lòng dán Token GHN hợp lệ (ít nhất 20 ký tự).', 'error');
       return;
     }
     els.btnAdminPushToken.disabled = true;
     try {
-      await gasCall('adminPushToken', { token: tok });
+      showToast('Đang kiểm tra tính hợp lệ của Token với GHN...', 'info');
+      const check = await verifyGhnTokenDirect(tok);
+      if (!check.valid) {
+        showToast(`❌ Token này không hợp lệ trên GHN (${check.message})! Vui lòng kiểm tra lại.`, 'error', 6000);
+        return;
+      }
+      await gasCall('adminPushToken', {
+        token: tok,
+        owner: check.name,
+        adminKey: 'ghn_revert_secret_2026'
+      });
       els.adminTokenInput.value = '';
-      showToast('Đã cập nhật Token mới lên máy chủ!', 'success');
+      showToast(`✓ Đã cập nhật Token sống của ${check.name} lên máy chủ!`, 'success', 5000);
       await refreshGatewayStatus(true);
     } catch (err) {
       showToast(err.message, 'error', 6000);
