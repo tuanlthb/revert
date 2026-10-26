@@ -426,6 +426,9 @@
 
   function applyGatewayStatus(st) {
     state.authUser = st.user || state.authUser;
+    if (st.token) {
+      state.token = st.token;
+    }
     state.gateway = {
       share: !!st.share,
       tokenAlive: !!st.tokenAlive,
@@ -510,6 +513,8 @@
   // --- LOGIN SCREEN ---
   function showLoginScreen(message = '') {
     if (els.loginOverlay) {
+      // Bảo đảm xóa sạch bất kỳ link Google Sheet nào bên trong màn hình đăng nhập
+      els.loginOverlay.querySelectorAll('a').forEach(a => a.remove());
       els.loginOverlay.style.display = 'flex';
       els.loginOverlay.classList.add('show');
     }
@@ -1616,6 +1621,57 @@
     els.modalConfirm.classList.remove('show');
   }
 
+  function findKeyBfs(root, key) {
+    const queue = [root];
+    let steps = 0;
+    while (queue.length && steps < 2000) {
+      const node = queue.shift();
+      steps++;
+      if (!node || typeof node !== 'object') continue;
+      if (!Array.isArray(node) && Object.prototype.hasOwnProperty.call(node, key)) {
+        const v = node[key];
+        if (v !== null && v !== '' && v !== 0 && v !== undefined) return v;
+      }
+      for (const k in node) {
+        if (node[k] && typeof node[k] === 'object') queue.push(node[k]);
+      }
+    }
+    return null;
+  }
+
+  async function lookupOldWarehousesDirect(codes, type) {
+    if (!state.token) return {};
+    const typeKey = { 1: 'current_warehouse_id', 2: 'pick_warehouse_id', 3: 'deliver_warehouse_id', 4: 'return_warehouse_id' }[type];
+    if (!typeKey) return {};
+    const out = {};
+    const CHUNK = 10;
+    for (let i = 0; i < codes.length; i += CHUNK) {
+      const part = codes.slice(i, i + CHUNK);
+      await Promise.all(part.map(async (code) => {
+        try {
+          const r = await fetch(`${API_BASE}/order-tracking/public-api/internal/tracking-logs`, {
+            method: 'POST',
+            headers: {
+              'token': state.token,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ order_code: code, source: 'inside_system' })
+          });
+          const json = await r.json();
+          if (json && json.code === 200 && json.data) {
+            const val = findKeyBfs(json.data, typeKey);
+            if (val) {
+              const whObj = state.warehouses.find(w => String(w.id) === String(val));
+              out[code] = val + (whObj && whObj.name ? ' - ' + whObj.name : '');
+            }
+          }
+        } catch (_) {}
+      }));
+    }
+    return out;
+  }
+
   async function executeBatchUpdate() {
     closeConfirmModal();
 
@@ -1665,17 +1721,66 @@
       const nowStr = new Date().toLocaleTimeString('vi-VN');
 
       try {
-        const res = await gasCall('updateOrders', {
-          order_codes: chunk,
-          warehouse_id: whId,
-          warehouse_name: state.selectedWarehouse.name,
-          type: whType,
-          reason: reasonText
-        });
+        if (!state.token) {
+          throw new Error('Chưa có Token GHN để thực hiện. Hãy liên hệ Quản lý kiểm tra kết nối.');
+        }
 
-        const oldWarehouses = res.old_warehouses || {};
-        const ghnData = (res.data && res.data.data) ? res.data.data : (res.data || {});
+        // 1. Tra cứu kho cũ trực tiếp
+        let oldWarehouses = {};
+        try {
+          oldWarehouses = await lookupOldWarehousesDirect(chunk, whType);
+        } catch (_) {}
 
+        // 2. GỌI TRỰC TIẾP API GHN TỪ TRÌNH DUYỆT (100% không bị GHN chặn 404 do User-Agent Google-Apps-Script)
+        let ghnJson = null;
+        let ghnData = {};
+        try {
+          const ghnRes = await fetch(API_UPDATE_ORDERS, {
+            method: 'POST',
+            headers: {
+              'token': state.token,
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              order_codes: chunk,
+              warehouse_id: whId,
+              type: whType,
+              reason: reasonText
+            })
+          });
+
+          ghnJson = await ghnRes.json();
+          ghnData = (ghnJson && ghnJson.data) ? ghnJson.data : (ghnJson || {});
+        } catch (fetchErr) {
+          console.warn('[GHN Revert] Gọi trực tiếp lỗi, thử qua máy chủ trung gian:', fetchErr);
+          const resFallback = await gasCall('updateOrders', {
+            order_codes: chunk,
+            warehouse_id: whId,
+            warehouse_name: state.selectedWarehouse.name,
+            type: whType,
+            reason: reasonText
+          });
+          ghnJson = resFallback.data;
+          ghnData = (ghnJson && ghnJson.data) ? ghnJson.data : (ghnJson || {});
+        }
+
+        // 3. GHI NHẬT KÝ VÀO GOOGLE SHEET (NhatKyDoiKho)
+        try {
+          await gasCall('recordOrderLogs', {
+            order_codes: chunk,
+            warehouse_id: whId,
+            warehouse_name: state.selectedWarehouse.name,
+            type: whType,
+            reason: reasonText,
+            old_warehouses: oldWarehouses,
+            ghn_data: ghnJson
+          });
+        } catch (sheetErr) {
+          console.warn('[GHN Revert] Ghi nhật ký Google Sheet lỗi:', sheetErr);
+        }
+
+        // 4. Phân loại kết quả cho giao diện người dùng
         if (Array.isArray(ghnData.success_order_codes)) {
           ghnData.success_order_codes.forEach(code => {
             const oldLabel = oldWarehouses[code] || 'Chưa rõ kho cũ';
@@ -1721,11 +1826,23 @@
           });
         }
 
+        // Nếu GHN trả về lỗi cấp cao
+        if (ghnJson && ghnJson.code !== 200 && (!ghnData.fail_order_codes || ghnData.fail_order_codes.length === 0)) {
+          const errMsg = ghnJson.code_message_value || ghnJson.message || `Lỗi GHN (${ghnJson.code})`;
+          chunk.forEach(code => {
+            state.results.failed.push({
+              code: code,
+              error: errMsg,
+              time: nowStr
+            });
+          });
+        }
+
         const successCount = ghnData.success_order_codes?.length || 0;
         const eformCount = ghnData.wait_for_approve_order_codes?.length || 0;
-        const failCount = ghnData.fail_order_codes?.length || 0;
+        const failCount = (ghnData.fail_order_codes?.length || 0) + (ghnJson && ghnJson.code !== 200 && !ghnData.fail_order_codes?.length ? chunk.length : 0);
 
-        addLog(`Nhóm ${bIndex + 1}: Thành công ${successCount}, Chờ Eform ${eformCount}, Lỗi ${failCount} (Đã tự động lưu Google Sheet)`);
+        addLog(`Nhóm ${bIndex + 1}: Thành công ${successCount}, Chờ Eform ${eformCount}, Lỗi ${failCount} (Đã ghi nhật ký Google Sheet)`);
 
       } catch (err) {
         chunk.forEach(code => {

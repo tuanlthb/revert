@@ -1,4 +1,4 @@
-# GHN Revert Hub - Công Cụ Đổi Kho GHN Trực Tuyến (v4.2)
+# GHN Revert Hub - Công Cụ Đổi Kho GHN Trực Tuyến (v4.3)
 
 Ứng dụng web trực tuyến hỗ trợ chuyển đổi kho hàng loạt cho các đơn hàng thông qua hệ thống **GHN Tra Cứu Nội Bộ** (`https://tracuunoibo.ghn.vn/internal/revert`) kết hợp máy chủ bảo mật Google Apps Script và ghi log Google Sheet.
 
@@ -8,23 +8,15 @@
 
 ---
 
-## 🌟 Tính Năng & Cải Tiến v4.2
+## 🌟 Cải Tiến Quan Trọng v4.3:
 
-1. **Phạm Vi Giới Hạn Nghiêm Ngặt Cho Tampermonkey**:
-   - Widget bắt Token chỉ kích hoạt duy nhất trên domain `tracuunoibo.ghn.vn`.
-   - Tuyệt đối không can thiệp vào `nhanh.ghn.vn` hay các trang nội bộ khác của GHN, bảo toàn 100% các tiện ích báo cáo khác của bạn.
-2. **Ẩn Bảng Google Sheet & Hướng Dẫn Lấy Token Đối Với Nhân Viên**:
-   - Nhân viên thường khi vào trang đăng nhập và giao diện đổi kho sẽ **không thấy link Google Sheet hay nút Hướng Dẫn**.
-   - Chỉ khi Quản lý đăng nhập (vai trò `admin`), các nút mở Google Sheet và nút Hướng Dẫn Tampermonkey mới hiển thị trong phần **Quản Lý Chia Sẻ**.
-3. **Bảo Mật Token Quản Lý Tuyệt Đối**:
-   - Token GHN của Quản lý được giữ an toàn trên Google Apps Script, trình duyệt của nhân viên **không bao giờ nhận Token thô**.
-   - Mọi máy tính của nhân viên khi vào web đều thao tác được qua máy chủ trung gian mà không cần cài extension hay lấy token thủ công.
-4. **Nút BẬT / TẮT Chia Sẻ Token**:
-   - Quản lý có công tắc **BẬT / TẮT CHIA SẺ** ngay trên Widget Tampermonkey tại `tracuunoibo.ghn.vn` và trên web.
-   - Khi TẮT: hệ thống lập tức chặn toàn bộ nhân viên thao tác.
-5. **Cơ Chế Đăng Nhập & Ghi Nhật Ký Google Sheet**:
-   - Bắt buộc nhân viên đăng nhập trước khi sử dụng.
-   - Tự động ghi lại lịch sử thao tác vào tab `NhatKyDoiKho` trên Google Sheet.
-6. **Chọn Phường/Xã Đúng (Hệ Thống Tự Chọn Kho)**:
-   - Hỗ trợ cả 2 chuẩn địa chỉ GHN: Địa chỉ cũ (3 cấp: Tỉnh -> Quận -> Phường) và Địa chỉ mới V3 (2 cấp: Tỉnh -> Phường).
-   - Tự động tra cứu và điền kho phụ trách theo đúng quy định của GHN.
+1. **Khắc Phục Triệt Để Lỗi HTTP 404 Khi Đổi Kho**:
+   - Trình duyệt nhân viên gửi lệnh trực tiếp đến API GHN (`fe-online-gateway.ghn.vn`) với User-Agent chuẩn của trình duyệt (tránh tường lửa GHN chặn User-Agent của Google Apps Script).
+   - Đơn hàng được đổi kho thành công thực tế, sau đó tự động gửi dữ liệu về Google Apps Script để lưu nhật ký vào Google Sheet.
+2. **Cơ Chế Đồng Bộ Token An Toàn Tuyệt Đối Cho Tài Khoản GHN**:
+   - Gỡ bỏ hoàn toàn việc can thiệp vào các hàm fetch / XHR của trang GHN.
+   - Gỡ bỏ vòng lặp quét 3 giây.
+   - **Chỉ tự động đẩy Token 1 lần duy nhất vào đầu ngày**, hoặc chỉ khi Quản lý chủ động bấm nút "⚡ Đẩy Token".
+3. **Bảo Mật Giao Diện & Xóa Triệt Để Link Xem Log Trên Trang Đăng Nhập**:
+   - Bổ sung cấu hình chống cache và mã xóa tự động mọi liên kết ngoài trong modal đăng nhập.
+   - Chỉ Quản lý đăng nhập mới có quyền mở xem Bảng Nhật Ký Google Sheet.
