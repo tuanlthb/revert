@@ -467,9 +467,11 @@
       if (res.status === 401) {
         return { valid: false, message: 'Token đã hết hạn phiên làm việc trên GHN (401)' };
       }
-      return { valid: false, message: `GHN trả về HTTP ${res.status}` };
-    } catch (_) {}
-    return { valid: false, message: 'Không thể kết nối máy chủ GHN' };
+      return { valid: true, name: 'Quản lý GHN', message: `HTTP ${res.status}` };
+    } catch (_) {
+      // Nếu mạng nhân viên bị chặn gọi user-info hoặc mạng chập chờn, vẫn cho phép tiếp tục với Token do Quản lý cấp
+      return { valid: true, name: 'Quản lý GHN', message: 'Dùng token do Quản lý chia sẻ' };
+    }
   }
 
   function applyGatewayStatus(st) {
