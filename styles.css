@@ -141,7 +141,14 @@ body {
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
   color: var(--text-muted);
-  transition: all 0.2s;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.token-status-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .token-status-pill.connected {

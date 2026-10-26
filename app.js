@@ -2184,6 +2184,14 @@
         refreshGatewayStatus(true);
       });
     }
+    if (els.tokenPill) {
+      els.tokenPill.style.cursor = 'pointer';
+      els.tokenPill.title = 'Bấm để kiểm tra lại kết nối Token với máy chủ';
+      els.tokenPill.addEventListener('click', () => {
+        showToast('Đang làm mới trạng thái kết nối Token...', 'info', 2000);
+        refreshGatewayStatus(true);
+      });
+    }
     if (els.btnOpenAdmin) {
       els.btnOpenAdmin.addEventListener('click', () => {
         renderAdminPanel();

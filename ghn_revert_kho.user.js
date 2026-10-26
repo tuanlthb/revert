@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.7)
+// @name         GHN Revert Kho - Quản Trị & Đồng Bộ Token (v4.8)
 // @namespace    http://tampermonkey.net/
-// @version      4.7
+// @version      4.8
 // @description  Đọc Token GHN an toàn 100% trên tracuunoibo.ghn.vn (KHÔNG can thiệp mạng/fetch của trang, không gây đơ trang). Hỗ trợ đẩy Token đầu ngày và nút BẬT / TẮT CHIA SẺ Token với cơ chế đa tầng chống lỗi HTTP 404.
 // @author       GHN Tool
 // @match        https://tracuunoibo.ghn.vn/*
@@ -82,7 +82,11 @@
   // ============================================================================
   function readOfficialGhnToken() {
     try {
-      const t = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+      let t = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
+      if (!t && document.cookie) {
+        const m = document.cookie.match(/(?:^|;\s*)(?:token|accessToken|access_token)=([^;]+)/i);
+        if (m) t = decodeURIComponent(m[1]);
+      }
       const clean = cleanToken(t);
       if (isValidTokenFormat(clean)) return clean;
     } catch (_) {}
@@ -222,13 +226,32 @@
       return { valid: false, message: 'Chưa có Token trong phiên đăng nhập' };
     }
 
+    // Ưu tiên 1: fetch() trực tiếp từ trang tracuunoibo (chuẩn CORS của trang, không phụ thuộc quyền GM)
     try {
-      return new Promise((resolve) => {
+      const res = await fetch(API_USER_INFO, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json', 'token': clean }
+      });
+      if (res.status === 200) {
+        const data = await res.json();
+        if (data && data.code === 200 && data.data) {
+          const d = data.data;
+          const owner = d.full_name || d.name || readOfficialGhnUser() || 'Quản lý GHN';
+          return { valid: true, token: clean, owner: owner, message: `Hợp lệ (${owner})` };
+        }
+      } else if (res.status === 401) {
+        return { valid: false, token: clean, message: 'Token đã hết hạn phiên (401)' };
+      }
+    } catch (_) {}
+
+    // Ưu tiên 2: GM_xmlhttpRequest nếu fetch bị chặn
+    try {
+      return await new Promise((resolve) => {
         GM_xmlhttpRequest({
           method: 'GET',
           url: API_USER_INFO,
           headers: { 'Accept': 'application/json', 'token': clean },
-          timeout: 10000,
+          timeout: 8000,
           onload: function (res) {
             let data = null;
             try { data = JSON.parse(res.responseText); } catch (_) {}
@@ -239,37 +262,18 @@
             } else if (res.status === 401 || (data && data.code === 401)) {
               resolve({ valid: false, token: clean, message: 'Token đã hết hạn phiên (401)' });
             } else {
-              const localUser = readOfficialGhnUser();
-              if (localUser && res.status < 400) {
-                resolve({ valid: true, token: clean, owner: localUser, message: `Hợp lệ (${localUser})` });
-              } else {
-                resolve({ valid: false, token: clean, message: `HTTP ${res.status}` });
-              }
+              resolve({ valid: false, token: clean, message: `HTTP ${res.status}` });
             }
           },
           onerror: function () {
-            const localUser = readOfficialGhnUser();
-            if (localUser) {
-              resolve({ valid: true, token: clean, owner: localUser, message: `Hợp lệ (${localUser})` });
-            } else {
-              resolve({ valid: false, token: clean, message: 'Không thể kết nối kiểm tra' });
-            }
+            resolve({ valid: false, token: clean, message: 'Lỗi kết nối máy chủ GHN' });
           },
           ontimeout: function () {
-            const localUser = readOfficialGhnUser();
-            if (localUser) {
-              resolve({ valid: true, token: clean, owner: localUser, message: `Hợp lệ (${localUser})` });
-            } else {
-              resolve({ valid: false, token: clean, message: 'Hết thời gian chờ (Timeout)' });
-            }
+            resolve({ valid: false, token: clean, message: 'Hết thời gian chờ (Timeout)' });
           }
         });
       });
     } catch (_) {
-      const localUser = readOfficialGhnUser();
-      if (localUser) {
-        return { valid: true, token: clean, owner: localUser, message: `Hợp lệ (${localUser})` };
-      }
       return { valid: false, token: clean, message: 'Lỗi xác thực' };
     }
   }
