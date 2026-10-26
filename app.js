@@ -501,15 +501,19 @@
             state.isTokenValid = true;
             const owner = check.name || st.tokenOwner || 'Quản lý';
             const timeStr = st.tokenUpdatedAt ? ` (Cập nhật ${new Date(st.tokenUpdatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })})` : '';
-            setConnectionStatus('ready', `Đã kết nối Token (${owner}${timeStr})`);
+            const shareNote = st.share === false ? ' • 🔒 Đang TẮT chia sẻ nhân viên' : '';
+            setConnectionStatus('ready', `Đã kết nối Token (${owner}${timeStr})${shareNote}`);
             if (els.gatewayBanner) els.gatewayBanner.style.display = 'none';
           }
         });
       } else {
-        setConnectionStatus('ready', 'Đã kết nối Token GHN (Sẵn sàng)');
+        const shareNote = st.share === false ? ' • 🔒 Đang TẮT chia sẻ nhân viên' : '';
+        setConnectionStatus('ready', `Đã kết nối Token GHN (Sẵn sàng)${shareNote}`);
         if (els.gatewayBanner) els.gatewayBanner.style.display = 'none';
       }
-      if (els.hubShareBadge) els.hubShareBadge.style.display = 'none';
+      if (els.hubShareBadge) {
+        els.hubShareBadge.style.display = st.share === false ? 'inline-flex' : 'none';
+      }
     } else {
       const isLocked = st.share === false && st.tokenAlive;
       const statusType = isLocked ? 'locked' : 'disconnected';
@@ -738,7 +742,12 @@
     const enabled = els.adminShareToggle.checked;
     els.adminShareToggle.disabled = true;
     try {
-      await gasCall('adminSetShare', { enabled });
+      await gasCall('adminSetShare', {
+        enabled,
+        adminKey: 'ghn_revert_secret_2026'
+      });
+      if (state.gateway) state.gateway.share = enabled;
+      renderAdminPanel();
       showToast(enabled ? 'Đã BẬT chia sẻ Token cho nhân viên.' : 'Đã TẮT chia sẻ Token. Nhân viên không thể thao tác.', enabled ? 'success' : 'warning');
       await refreshGatewayStatus(true);
     } catch (err) {
